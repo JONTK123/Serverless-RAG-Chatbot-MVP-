@@ -1,0 +1,14 @@
+# Documentos para RAG
+
+Este diretório contém os documentos PDF que serão processados e indexados no Qdrant.
+
+## Como adicionar documentos:
+
+1. Coloque seus arquivos PDF neste diretório
+2. Execute o script de ingestão: `npm run ingest`
+3. Os documentos serão processados e salvos no Qdrant
+
+## Nota:
+
+Os arquivos PDF **não** são commitados no repositório por segurança e tamanho.
+Veja o `.gitignore` para mais detalhes.

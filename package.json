@@ -1,0 +1,41 @@
+{
+  "name": "serverless-rag-chatbot-mvp",
+  "version": "1.0.0",
+  "description": "Serverless RAG Chatbot MVP com Nuxt 3, AWS Lambda, LangChain e Qdrant",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "ingest": "tsx scripts/ingest.ts",
+    "deploy": "npm run build && serverless deploy"
+  },
+  "dependencies": {
+    "@langchain/community": "^0.0.45",
+    "@langchain/core": "^0.1.52",
+    "@langchain/openai": "^0.0.25",
+    "@qdrant/js-client-rest": "^1.8.2",
+    "langchain": "^0.1.30",
+    "nuxt": "^3.10.3",
+    "pdf-parse": "^1.1.1",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@nuxtjs/tailwindcss": "^6.11.4",
+    "@types/node": "^20.11.25",
+    "@types/pdf-parse": "^1.1.4",
+    "dotenv": "^16.4.5",
+    "eslint": "^8.57.0",
+    "serverless": "^3.38.0",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
