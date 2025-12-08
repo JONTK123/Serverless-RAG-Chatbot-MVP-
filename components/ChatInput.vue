@@ -1,13 +1,103 @@
 <template>
-  <div class="chat-input">
-    <!-- Componente de input para mensagens -->
-    <!-- Será implementado na branch: 101225-frontend-ui -->
-  </div>
+  <form @submit.prevent="handleSubmit" class="flex gap-3">
+    <!-- Input Field -->
+    <div class="flex-1 relative">
+      <input
+        v-model="inputMessage"
+        type="text"
+        placeholder="Digite sua mensagem..."
+        :disabled="disabled"
+        class="w-full px-4 py-3 pr-12 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed transition-all"
+        @keydown.enter.exact.prevent="handleSubmit"
+      />
+      
+      <!-- Character Count (Optional) -->
+      <div 
+        v-if="inputMessage.length > 0" 
+        class="absolute right-3 top-1/2 transform -translate-y-1/2 text-xs text-gray-400"
+      >
+        {{ inputMessage.length }}
+      </div>
+    </div>
+
+    <!-- Send Button -->
+    <button
+      type="submit"
+      :disabled="disabled || !inputMessage.trim()"
+      class="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-medium hover:from-blue-600 hover:to-indigo-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-all transform hover:scale-105 active:scale-95"
+    >
+      <svg 
+        v-if="!disabled" 
+        class="w-5 h-5" 
+        fill="none" 
+        stroke="currentColor" 
+        viewBox="0 0 24 24"
+      >
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+      </svg>
+      <svg 
+        v-else 
+        class="w-5 h-5 animate-spin" 
+        fill="none" 
+        stroke="currentColor" 
+        viewBox="0 0 24 24"
+      >
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+      </svg>
+    </button>
+  </form>
 </template>
 
 <script setup lang="ts">
-// Emits para o componente
+/**
+ * ChatInput Component
+ * 
+ * Provides an input field for users to type and send messages.
+ * Handles form submission, keyboard shortcuts, and disabled states.
+ * 
+ * Features:
+ * - Text input with character count
+ * - Submit button with loading state
+ * - Enter key to send (Shift+Enter for new line handled by parent)
+ * - Disabled state during message processing
+ * 
+ * @component
+ * @prop {boolean} disabled - Whether the input should be disabled
+ * @emits {send} Emitted when user sends a message with the message text
+ * 
+ * @example
+ * <ChatInput 
+ *   :disabled="isLoading" 
+ *   @send="handleSendMessage" 
+ * />
+ */
+
+import { ref } from 'vue'
+
+interface Props {
+  disabled?: boolean
+}
+
+defineProps<Props>()
+
 const emit = defineEmits<{
   send: [message: string]
 }>()
+
+const inputMessage = ref('')
+
+/**
+ * Handles form submission
+ * Validates input, emits send event, and clears the input field
+ */
+const handleSubmit = () => {
+  const message = inputMessage.value.trim()
+  if (message && !props.disabled) {
+    emit('send', message)
+    inputMessage.value = ''
+  }
+}
+
+// Re-expose props for template usage
+const props = defineProps<Props>()
 </script>

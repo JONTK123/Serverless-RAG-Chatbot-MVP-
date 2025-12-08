@@ -22,13 +22,13 @@
     "@qdrant/js-client-rest": "^1.8.2",
     "langchain": "^0.1.30",
     "nuxt": "^3.10.3",
-    "pdf-parse": "^1.1.1",
+    "uuid": "^9.0.1",
     "vue": "^3.4.21"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.11.4",
     "@types/node": "^20.11.25",
-    "@types/pdf-parse": "^1.1.4",
+    "@types/uuid": "^9.0.7",
     "dotenv": "^16.4.5",
     "eslint": "^8.57.0",
     "serverless": "^3.38.0",
