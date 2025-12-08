@@ -1,6 +1,6 @@
 # Organização de Branches do Projeto
 
-Este documento descreve todas as branches que serão criadas para o desenvolvimento do projeto, seguindo o padrão ProMiles: `DDMMYY-Feature-Description`
+Este documento descreve todas as branches que serão criadas para o desenvolvimento do projeto, seguindo o padrão Standard: `DDMMYY-Feature-Description`
 
 ## Estrutura de Branches
 

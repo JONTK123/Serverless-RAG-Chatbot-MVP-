@@ -97,7 +97,23 @@ Esta seção detalha as dúvidas levantadas durante o planejamento e a solução
 
 ---
 
-## 3. Fluxo de Trabalho Git (Padrão ProMiles)
+### 2.6. Resumo das Decisões Técnicas
+
+| Item | Dúvida/Contexto | Onde está documentado | Solução Adotada |
+|------|----------------|----------------------|-----------------|
+| **Redis (Inicialmente)** | "Devo usar Redis para o histórico?" | **Seção 2.1** | Descartado por custo/complexidade (VPC). Usamos LocalStorage no frontend. |
+| **Identificação Usuário** | Como identificar usuários sem autenticação? | **Seção 2.1** | UUID no LocalStorage para logs/analytics. Enviado via header `x-user-id`. |
+| **Banco Vetorial vs. Relacional** | Por que não dump de JSON no prompt? | **Seção 2.4** | Qdrant resolve o problema de Context Window (limite de tokens). Busca semântica. |
+| **WebSocket vs. Lambda** | Como fazer streaming em Serverless? | **Seção 2.2** | WebSocket complexo demais. Usamos HTTP Streaming com `RESPONSE_STREAM`. |
+| **LangChain vs. Na mão** | Vale a pena usar LangChain? | **Seção 2.5** | Sim. Nova sintaxe (`.stream()`) simplificou. Processa PDF automaticamente. |
+| **Memória Persistente** | Onde salvar o histórico? | **Seção 2.1** | Frontend é o "dono" do estado. Envia histórico completo a cada request. |
+| **Config AWS Lambda (Streaming)** | Como ativar streaming na Lambda? | **Seção 5.1** | `invokeMode: RESPONSE_STREAM` no `serverless.yml`. |
+| **Nuxt Nitro vs. Express** | Por que Nitro e não Express? | **Seção 2.3** | Nitro é nativo do Nuxt, evita cold start, monorepo simplificado. |
+| **Function URL vs. API Gateway** | Qual usar para evitar buffer? | **Seção 1** | Function URL direto, sem passar pelo API Gateway tradicional. |
+| **PDF Processing** | pdf-parse ou LangChain? | **Package.json** | 100% LangChain com `PDFLoader`. Mais integrado e sem deps extras. |
+
+
+## 3. Fluxo de Trabalho Git (Padrão Standard)
 
 Seguiremos rigorosamente este fluxo para organização.
 

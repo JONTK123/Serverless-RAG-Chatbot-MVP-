@@ -55,7 +55,7 @@ Linhas de Código: Em breve (estrutura pronta)
 🎯 BRANCHES ESTRUTURADAS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Padrão: DDMMYY-Feature-Description (ProMiles)
+Padrão: DDMMYY-Feature-Description (Standard)
 
 main (produção)
   └── develop (integração)
@@ -90,7 +90,7 @@ DevOps:
 ✨ CARACTERÍSTICAS ESPECIAIS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ Git Workflow ProMiles - Completo e documentado
+✅ Git Workflow Standard - Completo e documentado
 ✅ Conventional Commits - Padrão aplicado
 ✅ Branch Naming - DDMMYY-Feature-Description
 ✅ TypeScript Strict - Em todos os arquivos
@@ -192,7 +192,7 @@ Git:
 ✓ Documentação abrangente (1,555 linhas)
 ✓ Placeholders implementados
 ✓ Script de branches criado e executável
-✓ Git Workflow ProMiles aplicado
+✓ Git Workflow Standard aplicado
 ✓ Conventional Commits documentado
 ✓ Dependências especificadas (Nuxt + LangChain)
 ✓ TypeScript configurado (strict mode)
@@ -203,7 +203,7 @@ Git:
 🎓 PADRÕES E BOAS PRÁTICAS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-✅ Git Workflow ProMiles
+✅ Git Workflow Standard
    • Branches: DDMMYY-Feature-Description
    • Commits: feat/fix/docs/refactor/chore
    • Flow: Feature → develop → main
@@ -244,7 +244,7 @@ A documentação está completa com:
   • Exemplos de código
 
 O Git Workflow está totalmente documentado:
-  • Padrão ProMiles aplicado
+  • Padrão Standard aplicado
   • 5 branches feature planejadas
   • Conventional Commits especificado
   • Script automatizado fornecido
@@ -254,7 +254,7 @@ O Git Workflow está totalmente documentado:
 ║   ✅ ESTRUTURA 100% COMPLETA                                        ║
 ║   🚀 PRONTO PARA CODIFICAÇÃO                                        ║
 ║   📅 Criado em: 08/12/2025                                          ║
-║   🏗️  Padrão: ProMiles Git Workflow                                 ║
+║   🏗️  Padrão: Standard Git Workflow                                 ║
 ║   📚 Documentação: 1,555 linhas                                     ║
 ║   📦 Arquivos: 24                                                   ║
 ║                                                                      ║
