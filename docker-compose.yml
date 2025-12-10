@@ -1,0 +1,51 @@
+# =============================================================================
+# DOCKER COMPOSE - RAG CHATBOT MVP
+# =============================================================================
+# Orquestra o frontend Nuxt em container Docker local
+# Backend roda no AWS Lambda (separado)
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # Frontend Nuxt em desenvolvimento
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    
+    container_name: rag-chatbot-frontend
+    
+    ports:
+      - "3000:3000"  # Acesso via http://localhost:3000
+    
+    volumes:
+      # Hot-reload: código fonte sincronizado
+      - .:/app
+      - /app/node_modules  # Preserva node_modules do container
+      - /app/.nuxt        # Preserva cache do Nuxt
+    
+    environment:
+      # Variáveis de ambiente do .env
+      - NODE_ENV=development
+      # API_BASE_URL deve apontar para Lambda Function URL após deploy
+      # Exemplo: https://abc123.lambda-url.sa-east-1.on.aws
+      - API_BASE_URL=${API_BASE_URL}
+      # OpenAI e Qdrant não são necessários no frontend
+      # (apenas no backend Lambda)
+    
+    env_file:
+      - .env  # Carrega automaticamente do .env
+    
+    # Reinicia automaticamente se crashar
+    restart: unless-stopped
+    
+    # Comando executado (definido no Dockerfile)
+    # pnpm dev --host 0.0.0.0
+    
+    networks:
+      - rag-network
+
+networks:
+  rag-network:
+    driver: bridge

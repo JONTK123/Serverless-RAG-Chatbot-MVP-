@@ -37,6 +37,9 @@ export default defineEventHandler(async (event) => {
   // 5. Criar chain com LangChain (prompt + LLM + context)
   // 6. Retornar resposta com streaming
   
+  // Forçar resposta JSON
+  setResponseHeader(event, 'Content-Type', 'application/json')
+  
   return {
     message: 'Chat endpoint - a ser implementado'
   }

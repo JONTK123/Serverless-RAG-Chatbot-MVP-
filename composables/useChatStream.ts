@@ -53,6 +53,10 @@ export const useChatStream = () => {
     error.value = null
 
     try {
+      // Obter a URL base da API (dinâmica: local ou Lambda)
+      const config = useRuntimeConfig()
+      const apiBase = config.public.apiBase
+      
       // Prepare the payload with question and full history
       const payload = {
         question: question.trim(),
@@ -63,7 +67,11 @@ export const useChatStream = () => {
       }
 
       // Make request to the API endpoint
-      const response = await fetch('/api/chat', {
+      // Se apiBase é uma URL completa (Lambda), usa ela
+      // Se é relativo (/api), usa o padrão local
+      const apiUrl = apiBase.startsWith('http') ? `${apiBase}/chat` : `${apiBase}/chat`
+      
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

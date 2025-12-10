@@ -7,7 +7,7 @@
 3. [Fluxo de Trabalho Git](#3-fluxo-de-trabalho-git-padrão-promiles)
 4. [Roteiro de Implementação](#4-roteiro-de-implementação-roadmap)
 5. [Implementação Técnica de Referência](#5-implementação-técnica-de-referência)
-6. [Checklist de Validação Final](#6-checklist-de-validação-final)
+6. [Otimização de Bundle: API-Only vs Full-Stack](#6-📦-otimização-de-bundle-api-only-vs-full-stack)
 7. [Estrutura do Projeto](#7-estrutura-do-projeto)
 8. [Como Começar](#8-como-começar)
 
@@ -705,7 +705,785 @@ serverless deploy   # lê o serverless.yml e faz o upload
 ```
 Após o deploy, o terminal retorna a Function URL pública (ex: `https://xyz.lambda-url.us-east-1.on.aws`).
 
-## 6. Estrutura do Projeto
+---
+
+### 📦 O que `pnpm run deploy:api` faz?
+
+O script `deploy:api` executa dois comandos em sequência:
+
+```bash
+"deploy:api": "pnpm build && serverless deploy --verbose"
+```
+
+#### 1️⃣ `pnpm build` → Executa `nuxt build`:
+- Compila o código Vue/Nuxt (TypeScript → JavaScript)
+- Gera a pasta `.output/server/` com o código otimizado para Lambda
+- Faz **tree-shaking** (remove código não usado)
+- Faz **minificação** (reduz tamanho dos arquivos)
+- Faz **bundling** de dependências em um único arquivo (`index.mjs` de ~208 KB)
+
+#### 2️⃣ `serverless deploy` → Pega o `.output/server/` e:
+- Cria o ZIP (~517 KB)
+- Faz upload para S3
+- Cria/atualiza a Lambda Function na AWS
+- Retorna a Function URL pública
+
+#### 🤔 Por que o build é necessário?
+
+| Uso | Precisa do Build? | Motivo |
+|-----|-------------------|--------|
+| **Lambda (API)** | ✅ SIM | Lambda precisa do código compilado em `.output/server/` |
+| **Frontend Docker Local** | ✅ SIM | Também usa o build do Nuxt, mas com preset diferente (`node-server`) |
+
+O build é **essencial** para o Lambda porque:
+
+1. **Transforma TypeScript → JavaScript**: Lambda não executa TypeScript nativamente
+2. **Bundla dependências**: Todas as deps são empacotadas em um único arquivo (`index.mjs`)
+3. **Otimiza para produção**: Remove código de desenvolvimento, minifica, tree-shake
+4. **Reduz tamanho**: De ~500 MB (`node_modules` raiz) para ~2 MB (`.output/server/`)
+
+**Resultado final do build:**
+```
+.output/server/
+├── index.mjs       (208 KB) ← Código da aplicação + deps bundladas
+├── package.json    (673 B)  ← Metadados mínimos
+└── node_modules/   (~1.5 MB) ← Apenas deps que não podem ser bundladas
+```
+
+---
+
+## 6. 📦 Otimização de Bundle: API-Only vs Full-Stack
+
+### 🎯 Por que Full-Stack funcionou mas API-Only não?
+
+Durante o desenvolvimento, encontramos um problema curioso: o modo **Full-Stack funcionou de primeira**, mas o **API-Only dava erro de tamanho** (130 MB). 
+
+**A resposta:** O problema **nunca foi o build do Nuxt** - foi a **configuração do `serverless.yml`!**
+
+---
+
+#### 🔍 O que realmente aconteceu
+
+O build do Nuxt **sempre funcionou corretamente** em ambos os modos:
+
+```
+Build do Nuxt (.output/):
+├── public/     (500 KB)  ← Assets frontend (só no Full-Stack)
+└── server/     (2 MB)    ← Backend otimizado
+    └── node_modules/ (1.5 MB) ← Deps bundladas
+```
+
+O problema estava no **empacotamento do Serverless Framework**, não no build.
+
+---
+
+#### ✅ Full-Stack (funcionou de primeira)
+
+```yaml
+# serverless.yml Full-Stack
+package:
+  patterns:
+    - '.output/**'           # Inclui .output/public + .output/server
+    - '!node_modules/**'     # Exclui node_modules raiz
+```
+
+**O que o Serverless empacotava:**
+```
+ZIP enviado (~3.5 MB):
+├── .output/public/  ✅ (500 KB)
+├── .output/server/  ✅ (2 MB)
+└── node_modules/    ❌ Excluído corretamente
+```
+
+**Por que funcionou?** O pattern `.output/**` era específico o suficiente para que o Serverless não "vazasse" outros arquivos.
+
+---
+
+#### ❌ API-Only (não funcionou - ANTES de arrumar)
+
+```yaml
+# serverless.yml API-Only (ANTES)
+package:
+  patterns:
+    - '.output/server/**'    # Inclui server
+    - '!node_modules/**'     # DEVERIA excluir, mas...
+```
+
+**O que o Serverless REALMENTE empacotava:**
+```
+ZIP enviado (~130 MB):
+├── .output/server/  ✅ (2 MB)
+├── node_modules/    ❌ (500 MB) ← DA RAIZ! 😱
+```
+
+**Por que falhou?** O Serverless Framework faz um **glob match** na raiz do projeto. Como `.output/server/**` não cobre "tudo", ele ainda procurava outros arquivos e **encontrava o `node_modules/` da raiz do projeto**.
+
+A exclusão `!node_modules/**` não funcionava bem porque a **ordem dos patterns** estava errada.
+
+---
+
+#### ✅ API-Only (funcionou - DEPOIS de arrumar)
+
+```yaml
+# serverless.yml API-Only (DEPOIS)
+package:
+  patterns:
+    - '!**'                          # 1️⃣ Exclui ABSOLUTAMENTE TUDO
+    - '!node_modules/**'             # 2️⃣ Garante exclusão extra
+    - '.output/server/index.mjs'     # 3️⃣ Inclui APENAS o necessário
+    - '.output/server/package.json'
+    - '.output/server/node_modules/**'
+```
+
+**O que o Serverless empacota agora:**
+```
+ZIP enviado (~517 KB):
+├── .output/server/index.mjs      ✅ (208 KB)
+├── .output/server/package.json   ✅ (673 B)
+└── .output/server/node_modules/  ✅ (1.5 MB)
+```
+
+**Por que funciona?** O `!**` exclui **absolutamente tudo** primeiro, e depois incluímos **apenas** os arquivos específicos que precisamos.
+
+---
+
+#### 📊 Tabela Comparativa Final
+
+| Aspecto | Full-Stack | API-Only (antes) | API-Only (depois) |
+|---------|------------|------------------|-------------------|
+| **Build Nuxt** | ✅ Mesmo (~2 MB) | ✅ Mesmo (~2 MB) | ✅ Mesmo (~2 MB) |
+| **O que QUERIA enviar** | `.output/` inteiro | Apenas `.output/server/` | Apenas `.output/server/` |
+| **O que REALMENTE enviou** | ✅ `.output/` (~3.5 MB) | ❌ `.output/server/` + `node_modules/` raiz (~130 MB) | ✅ `.output/server/` (~517 KB) |
+| **Pattern inicial** | `.output/**` | `.output/server/**` | `!**` |
+| **node_modules raiz incluído?** | ❌ Não | ✅ SIM (bug!) | ❌ Não |
+| **Tamanho ZIP final** | ~3.5 MB ✅ | ~130 MB ❌ | ~517 KB ✅ |
+
+---
+
+#### 💡 Lição Aprendida
+
+**Resumo:** Nos dois casos (Full-Stack e API-Only):
+1. Você fazia o build → `pnpm build` → gerava `.output/` otimizado (~2-3 MB)
+2. Você jogava a build no Lambda → `serverless deploy`
+
+**O que aconteceu:**
+- ✅ O build **sempre funcionou**
+- ✅ A lógica de "Full-Stack = tudo, API-Only = só server" estava **certa**
+- ❌ O `serverless.yml` do API-Only tinha patterns que **vazavam o `node_modules/` raiz**
+
+**Por que Full-Stack funcionou "por sorte":**  
+O pattern `.output/**` era específico o suficiente para que o Serverless não "vazasse" outros arquivos.
+
+**Por que API-Only falhou:**  
+O pattern `.output/server/**` era menos abrangente, e o Serverless Framework ainda buscava outros arquivos na raiz, encontrando o `node_modules/` de 500 MB.
+
+> **A solução:** `'!**'` primeiro para garantir que **nada vaze**.
+
+---
+
+### 🌐 httpApi vs Function URL: Por que um funcionou e o outro não?
+
+Durante o desenvolvimento, testamos duas abordagens para expor a Lambda:
+
+#### ❌ Function URL (não funcionou inicialmente)
+
+```yaml
+functions:
+  api:
+    url:
+      cors: true
+      invokeMode: RESPONSE_STREAM
+```
+
+**Problema:** O Serverless Framework v3 criava a Function URL com `AuthType: AWS_IAM` por padrão, exigindo credenciais AWS assinadas para acesso. Resultado: **403 Forbidden** para requisições públicas.
+
+**Por que isso aconteceu:**
+- Function URLs são um recurso mais novo da AWS (2022)
+- O Serverless Framework não tinha controle total sobre o `AuthType` via sintaxe simples
+- Mesmo especificando `cors: true`, a URL era criada como privada
+
+**Solução temporária:** Executar `aws lambda update-function-url-config --auth-type NONE` manualmente após cada deploy.
+
+**Solução permanente:** Adicionar recurso CloudFormation customizado para forçar `AuthType: NONE`.
+
+---
+
+#### ✅ API Gateway HTTP API (funcionou de primeira)
+
+```yaml
+functions:
+  api:
+    events:
+      - httpApi: '*'
+```
+
+**Por que funcionou:**
+- API Gateway HTTP API é um serviço mais maduro e amplamente suportado
+- O Serverless Framework tem controle total sobre as configurações
+- Por padrão, cria endpoints **públicos** (sem autenticação)
+- Rota coringa `*` captura todas as requisições e repassa para a Lambda
+
+**Vantagens:**
+- ✅ Deploy determinístico (sempre público)
+- ✅ CORS configurável via provider
+- ✅ Suporte a custom domains
+- ✅ Métricas e logs integrados
+
+**Desvantagens:**
+- ❌ Limite de timeout de 30 segundos (vs 15 minutos na Function URL)
+- ❌ Não suporta `RESPONSE_STREAM` nativo (streaming funciona mas com overhead)
+- ❌ Custo adicional mínimo (mas irrelevante para MVP)
+
+---
+
+#### 📊 Comparação Final
+
+| Aspecto | Function URL | API Gateway HTTP API |
+|---------|--------------|----------------------|
+| **AuthType padrão (Serverless)** | `AWS_IAM` ❌ | Público ✅ |
+| **Timeout máximo** | 15 minutos | 30 segundos |
+| **Streaming nativo** | ✅ `RESPONSE_STREAM` | ⚠️ Via chunks |
+| **Configuração** | Requer CloudFormation extra | ✅ Funciona out-of-the-box |
+| **Custo** | Gratuito | +$1/milhão de requisições |
+| **Recomendação MVP** | ⚠️ Requer setup extra | ✅ **Use este** |
+
+---
+
+#### 🤔 Confusão Comum: "Mas httpApi não aceita streaming?"
+
+**Resposta curta:** Aceita sim! Mas de forma diferente.
+
+**Como funciona:**
+
+| Método | Function URL (`RESPONSE_STREAM`) | API Gateway (`httpApi`) |
+|--------|----------------------------------|-------------------------|
+| **Tipo** | Streaming nativo da Lambda | HTTP Transfer-Encoding: chunked |
+| **Implementação** | Lambda envia chunks diretamente | Lambda retorna body, Gateway repassa em chunks |
+| **Cliente** | Recebe chunks em tempo real | Recebe chunks em tempo real |
+| **Resultado** | ✅ Funciona | ✅ Funciona |
+
+**Em ambos os casos**, seu código no cliente usa o **mesmo** `fetch` + `ReadableStream`:
+
+```ts
+const response = await fetch('/api/chat', { method: 'POST', body: ... })
+const reader = response.body.getReader()
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  console.log(new TextDecoder().decode(value)) // chunks chegam aqui
+}
+```
+
+**A diferença está no backend:**
+
+```ts
+// Function URL (RESPONSE_STREAM)
+export const handler = awslambda.streamifyResponse(async (event, responseStream) => {
+  responseStream.write('chunk1\n')
+  responseStream.write('chunk2\n')
+  responseStream.end()
+})
+
+// API Gateway (HTTP chunked) - mais simples!
+export default defineEventHandler(async (event) => {
+  const stream = new ReadableStream(...)
+  return stream // Nuxt/Nitro cuida do resto
+})
+```
+
+**Conclusão:** Com `httpApi`, o streaming funciona perfeitamente para chat. A única limitação real é o **timeout de 30s**.
+
+---
+
+#### 🎯 Como Implementar Streaming: Suas Opções
+
+Se você quer streaming de resposta no chat, tem duas opções:
+
+##### ✅ Opção 1: httpApi (Atual) - **RECOMENDADO**
+
+**Status:** Já configurado e funcionando
+
+```yaml
+functions:
+  api:
+    events:
+      - httpApi: '*'
+```
+
+**Vantagens:**
+- ✅ Streaming já funciona (HTTP Transfer-Encoding: chunked)
+- ✅ Zero mudanças no código
+- ✅ Público por padrão (sem 403 Forbidden)
+- ✅ Setup simples
+
+**Desvantagens:**
+- ⚠️ Timeout de 30s (suficiente para 99% dos casos de chat)
+
+**Mudanças necessárias no código:** **NENHUMA** ✨
+
+---
+
+##### ⚠️ Opção 2: Function URL com RESPONSE_STREAM
+
+**Status:** Requer configuração adicional
+
+```yaml
+functions:
+  api:
+    handler: .output/server/index.handler
+    url:
+      cors: true
+      invokeMode: RESPONSE_STREAM
+    timeout: 120
+    memorySize: 512
+
+# Adicionar no final do serverless.yml
+resources:
+  Resources:
+    ApiLambdaFunctionUrl:
+      Type: AWS::Lambda::Url
+      Properties:
+        AuthType: NONE  # ← Crucial para acesso público
+        TargetFunctionArn: !GetAtt ApiLambdaFunction.Arn
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins: ["*"]
+          AllowMethods: ["*"]
+          AllowHeaders: ["*"]
+    
+    ApiLambdaPermissionFnUrl:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !Ref ApiLambdaFunction
+        Action: lambda:InvokeFunctionUrl
+        Principal: "*"
+        FunctionUrlAuthType: NONE
+```
+
+**Vantagens:**
+- ✅ Streaming nativo da Lambda
+- ✅ Timeout até 15 minutos
+
+**Desvantagens:**
+- ❌ Requer configuração CloudFormation extra
+- ❌ Precisa modificar handlers para usar `streamifyResponse`
+- ❌ Precisa instalar `@aws-lambda-powertools/streamify`
+
+**Mudanças necessárias no código:**
+
+```ts
+// ANTES (funciona com httpApi)
+export default defineEventHandler(async (event) => {
+  const stream = new ReadableStream({
+    async start(controller) {
+      controller.enqueue('chunk1\n')
+      controller.close()
+    }
+  })
+  return stream
+})
+
+// DEPOIS (para RESPONSE_STREAM)
+import { streamifyResponse } from '@aws-lambda-powertools/streamify'
+
+export const handler = streamifyResponse(async (event, responseStream) => {
+  responseStream.write('chunk1\n')
+  responseStream.end()
+})
+```
+
+---
+
+##### 📊 Comparação de Esforço
+
+| Aspecto | httpApi (Opção 1) | Function URL (Opção 2) |
+|---------|-------------------|------------------------|
+| **Config no serverless.yml** | ✅ Já está | ⚠️ Adicionar resources (20 linhas) |
+| **Mudança no código** | ✅ Zero | ❌ Reescrever todos os handlers |
+| **Instalar dependências** | ✅ Nada | ❌ `pnpm add @aws-lambda-powertools` |
+| **Streaming funciona** | ✅ Sim | ✅ Sim |
+| **Timeout** | 30s | 15 min |
+| **Público por padrão** | ✅ Sim | ⚠️ Só com CloudFormation |
+
+---
+
+##### 💡 Recomendação Final
+
+**Use httpApi (Opção 1)** porque:
+
+1. **Streaming já funciona** - seu código atual com `ReadableStream` funciona perfeitamente
+2. **30s é suficiente** - respostas de chat GPT raramente excedem 10s
+3. **Zero trabalho extra** - não precisa mudar absolutamente nada
+4. **Simples e confiável** - menos pontos de falha
+
+**Só use Function URL (Opção 2) se:**
+- Você realmente precisa de respostas >30s (muito raro)
+- Quer experimentar streaming nativo por curiosidade técnica
+- Está disposto a reescrever todos os handlers
+
+---
+
+### 🚫 Bloqueando Rotas de Frontend no Modo API-Only
+
+Quando você faz deploy apenas da API, ainda pode acontecer do SSR do Nuxt tentar renderizar páginas HTML. Aqui está como bloquear completamente.
+
+#### ✅ Resultado Esperado
+
+```bash
+# ❌ Rota raiz bloqueada
+$ curl https://sua-api.execute-api.sa-east-1.amazonaws.com
+{"message":"Not Found"}  # 404 do API Gateway
+
+# ✅ Rotas /api/* funcionam
+$ curl https://sua-api.execute-api.sa-east-1.amazonaws.com/api/chat
+{"message":"Chat endpoint - a ser implementado"}  # JSON puro
+```
+
+---
+
+#### 🔧 Solução 1: Bloquear no API Gateway (RECOMENDADO)
+
+Configure rotas específicas no `serverless.yml`:
+
+```yaml
+functions:
+  api:
+    handler: .output/server/index.handler
+    events:
+      # Bloquear rotas de frontend - só permite /api/*
+      - httpApi:
+          path: /api/{proxy+}
+          method: ANY
+      - httpApi:
+          path: /api/chat
+          method: POST
+      - httpApi:
+          path: /api/ingest
+          method: POST
+```
+
+**Vantagem:** O API Gateway retorna **404 antes de chegar na Lambda** → economia de custo e latência.
+
+---
+
+#### 🔧 Solução 2: Forçar Content-Type nos Handlers
+
+Adicione `setResponseHeader` em **todos os endpoints**:
+
+```typescript
+// server/api/chat.post.ts
+export default defineEventHandler(async (event) => {
+  // Forçar resposta JSON (evita SSR renderizar HTML)
+  setResponseHeader(event, 'Content-Type', 'application/json')
+  
+  return {
+    message: 'Chat endpoint - a ser implementado'
+  }
+})
+```
+
+**Por que precisa disso?**
+
+O Nuxt tem um **sistema de rotas universal** que tenta renderizar páginas HTML mesmo para rotas `/api/*` quando você retorna um objeto simples. Ao definir `Content-Type: application/json`, você força o Nuxt a enviar JSON puro sem passar pelo SSR.
+
+---
+
+#### 🔧 Solução 3: Middleware Global (Opcional)
+
+Adicione um middleware que bloqueia tudo exceto `/api/*`:
+
+```typescript
+// server/middleware/api-only.ts
+export default defineEventHandler((event) => {
+  const path = event.path || event.node.req.url || ''
+  
+  // Permitir apenas rotas /api/*
+  if (!path.startsWith('/api/')) {
+    throw createError({
+      statusCode: 404,
+      statusMessage: 'Not Found',
+      message: 'API-only mode. Frontend runs locally in Docker.'
+    })
+  }
+})
+```
+
+**Vantagem:** Bloqueia globalmente, mas a Lambda ainda processa a request.
+
+---
+
+#### 📊 Qual usar?
+
+| Abordagem | Bloqueia Onde | Vantagem | Desvantagem |
+|-----------|---------------|----------|-------------|
+| **Solução 1: httpApi paths** | API Gateway | Não chega na Lambda | Precisa listar todas as rotas |
+| **Solução 2: Content-Type** | Handler | Simples, 1 linha | Precisa em todos os endpoints |
+| **Solução 3: Middleware** | Nitro/Nuxt | Global, 3 linhas | Lambda processa antes de bloquear |
+
+**Recomendação:** **Solução 1 + 2** (bloquear no Gateway + forçar JSON nos handlers).
+
+---
+
+### 🔧 Bônus: O que o Build do Nuxt/Nitro faz automaticamente
+
+Embora o problema tenha sido no `serverless.yml`, é útil entender que o **Nitro já otimiza** o build automaticamente:
+
+#### Otimizações automáticas do Nitro:
+- ✅ Remove `test/`, `docs/`, `examples/` folders
+- ✅ Remove `*.md`, `*.map` files
+- ✅ Faz tree-shaking de código não usado
+- ✅ Minifica o código JavaScript
+- ✅ Bundla dependências em um único arquivo (`index.mjs`)
+
+#### Configurações extras no `nuxt.config.ts`:
+
+```typescript
+nitro: {
+  preset: 'aws-lambda',
+  serveStatic: false,
+  minify: true,
+  sourcemap: false,  // Remove source maps
+  
+  rollupConfig: {
+    output: {
+      format: 'esm',
+      sourcemap: false
+    }
+  }
+}
+```
+
+**Resultado do Build:**
+```
+.output/server/
+├── index.mjs       (208 KB) ← Código bundlado
+├── package.json    (673 B)
+└── node_modules/   (~1.5 MB) ← Apenas deps não bundláveis
+```
+
+> **Importante:** Essas otimizações do Nitro **sempre funcionaram**. O problema de 130 MB era porque o Serverless Framework incluía o `node_modules/` da **raiz do projeto** (500 MB), não o `.output/server/node_modules/` otimizado.
+
+---
+
+#### ⚙️ Configuração Final do serverless.yml
+
+```yaml
+package:
+  patterns:
+    - '!**'                     # 1. Exclui TUDO (primeira regra)
+    - '!node_modules/**'        # 2. Garante exclusão de node_modules raiz
+    - '!.nuxt/**'               # 3. Exclui cache do Nuxt
+    - '!.git/**'                # 4. Exclui arquivos git
+    - '.output/server/index.mjs'        # 5. Inclui só o que precisa
+    - '.output/server/package.json'
+    - '.output/server/node_modules/**'  # 6. Inclui deps do build
+```
+
+**Por que isso funciona?**
+1. `'!**'` exclui **absolutamente tudo** do projeto
+2. Depois você adiciona de volta **apenas** os arquivos da pasta `.output/server/`
+3. O `node_modules/` da raiz (500 MB) **nunca é incluído**
+4. Apenas o `node_modules/` otimizado dentro de `.output/server/` (2 MB) é incluído
+
+**Resultado real do projeto:**
+```
+Antes (ordem errada): 130 MB ZIP ❌ (incluía node_modules raiz)
+Depois (ordem correta): 517 KB ZIP ✅ (apenas .output/server)
+```
+
+---
+
+#### 📦 Otimização de package.json: DevDependencies
+
+Outra dica importante é garantir que suas **dependências de desenvolvimento** estejam em `devDependencies`, não em `dependencies`.
+
+##### 🤔 Por que isso importa?
+
+Quando você roda `pnpm install --production` ou quando o Serverless Framework faz o bundle, ele **ignora** tudo que está em `devDependencies`. Isso reduz o tamanho final do pacote.
+
+##### ✅ Dependências que devem estar em `devDependencies`:
+
+| Pacote | Por quê? |
+|--------|----------|
+| `dotenv` | Usado apenas em desenvolvimento (variáveis vão pro env da Lambda) |
+| `serverless` | Ferramenta de CLI, não roda em produção |
+| `serverless-dotenv-plugin` | Plugin do Serverless, não vai pro Lambda |
+| `typescript` | Compilador, código final é JS |
+| `eslint`, `prettier` | Ferramentas de dev |
+| `nodemon` | Dev server, não usa em Lambda |
+| `@types/*` | Types do TypeScript |
+| `tsx` | Runtime de dev para TypeScript |
+
+##### ✅ Dependências que devem estar em `dependencies`:
+
+| Pacote | Por quê? |
+|--------|----------|
+| `langchain`, `@langchain/*` | Usado em runtime |
+| `openai` | Cliente da API OpenAI |
+| `@qdrant/js-client-rest` | Cliente do Qdrant |
+| `nuxt`, `vue` | Framework de runtime |
+| `uuid` | Usado em runtime |
+
+##### 📋 Exemplo de package.json correto:
+
+```json
+{
+  "dependencies": {
+    "langchain": "^0.3.x",
+    "@langchain/openai": "^0.5.x",
+    "nuxt": "^3.x",
+    "vue": "^3.x"
+  },
+  "devDependencies": {
+    "dotenv": "^16.x",
+    "serverless": "^3.x",
+    "serverless-dotenv-plugin": "^6.x",
+    "typescript": "^5.x",
+    "@types/node": "^22.x"
+  }
+}
+```
+
+> **💡 Dica:** Execute `pnpm install` após mover dependências para garantir que o `pnpm-lock.yaml` seja atualizado corretamente.
+
+---
+
+### 🔗 Alternativa: Lambda Layers
+
+Se as otimizações acima não forem suficientes, a alternativa é usar **Lambda Layers** para separar as dependências pesadas.
+
+#### 🤔 O que são Lambda Layers?
+
+Layers são pacotes de código/dependências compartilhadas que podem ser reutilizadas por múltiplas Lambda Functions. Você sobe as deps uma vez e referencia em várias funções.
+
+#### 📦 Estrutura com Layers
+
+```
+meu-projeto/
+├── lambda-function/     (seu código - 5 MB)
+│   ├── index.mjs
+│   └── package.json
+│
+├── layers/
+│   ├── langchain-layer/         (Layer 1: 50 MB)
+│   │   ├── nodejs/node_modules/
+│   │   │   ├── langchain/
+│   │   │   ├── @langchain/
+│   │   │   └── encoding/
+│   │   └── layer.zip
+│   │
+│   └── openai-layer/            (Layer 2: 40 MB)
+│       ├── nodejs/node_modules/
+│       │   ├── openai/
+│       │   └── axios/
+│       └── layer.zip
+│
+└── serverless.yml  (referencia as layers)
+```
+
+#### ✅ Vantagens de Usar Layers
+
+1. **Separação de preocupações**: Cada layer tem responsabilidade clara
+2. **Reutilização**: Mesma layer pode ser usada por múltiplas funções
+3. **Versionamento**: Você versiona cada layer independentemente
+4. **Tamanho menor**: Função fica ~5 MB, layers compartilhadas (uploaded uma vez)
+5. **Cold start mais rápido**: Sem precisar descompactar 200+ MB
+6. **Atualização independente**: Atualizar dependência não redeploiya a função inteira
+
+#### ❌ Desvantagens
+
+1. **Complexidade aumenta**: Mais configuração no `serverless.yml`
+2. **Limite de layers**: AWS permite até 5 layers por função
+3. **Espaço total**: Soma da função + todas as layers não pode exceder 250 MB descompactado
+4. **Deployment mais lento**: Precisa fazer upload de múltiplos ZIPs
+
+#### 📋 Implementação com Layers (Exemplo)
+
+```yaml
+# serverless.yml com Layers
+
+service: rag-chatbot-mvp
+
+plugins:
+  - serverless-dotenv-plugin
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: sa-east-1
+
+# 🔥 Definir Layers
+layers:
+  langchainLayer:
+    path: layers/langchain
+    name: rag-chatbot-langchain-${sls:stage}
+    
+  openaiLayer:
+    path: layers/openai
+    name: rag-chatbot-openai-${sls:stage}
+
+functions:
+  api:
+    handler: .output/server/index.handler
+    # 🔥 Referenciar layers
+    layers:
+      - !Ref LangchainLayerLambdaLayer
+      - !Ref OpenaiLayerLambdaLayer
+    url:
+      cors: true
+      invokeMode: RESPONSE_STREAM
+    timeout: 120
+    memorySize: 512
+```
+
+#### 🛠️ Como Criar uma Layer
+
+```bash
+# 1. Criar estrutura de diretórios
+mkdir -p layers/langchain/nodejs
+
+# 2. Navegar e instalar deps
+cd layers/langchain/nodejs
+npm init -y
+npm install langchain @langchain/core @langchain/community @langchain/openai
+
+# 3. Compactar (a estrutura AWS espera nodejs/node_modules)
+cd ..
+zip -r langchain-layer.zip nodejs/
+
+# 4. No serverless.yml, apontar para o ZIP
+# (o path aponta para o arquivo ZIP ou para o diretório)
+```
+
+#### 📊 Tamanho Comparativo
+
+```
+SEM Layers (Current):
+├── Função ZIP: 130 MB ❌ Excede limite
+
+COM Layers (Otimizado):
+├── Função ZIP: 5 MB
+├── Langchain Layer: 50 MB (reutilizável)
+└── OpenAI Layer: 40 MB (reutilizável)
+Total enviado: 95 MB (layers são enviadas apenas uma vez) ✅
+```
+
+#### 🎯 Quando Usar Layers
+
+- **Use Layers se:**
+  - Bundle principal > 50 MB mesmo com otimizações
+  - Você tem múltiplas funções Lambda reutilizando as mesmas deps
+  - Quer cold starts mais rápidos
+  - Precisa versionar dependências independentemente
+
+- **Não use Layers se:**
+  - Bundle < 50 MB (simples é melhor)
+  - Função é única e não é reutilizada
+  - Quer keep it simple para MVP
+
+---
+
+## 7. Estrutura do Projeto
 
 ```
 Serverless-RAG-Chatbot-MVP-/
