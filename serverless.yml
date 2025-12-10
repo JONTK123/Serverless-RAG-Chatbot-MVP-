@@ -1,24 +1,140 @@
+# =============================================================================
+# SERVERLESS CONFIGURATION - RAG CHATBOT MVP
+# =============================================================================
+# 
+# DOIS MODOS DISPONÍVEIS:
+# 
+# 1. API-ONLY MODE - Somente Backend Lambda + Frontend Docker Local
+#    - Deploy apenas da API Lambda com streaming
+#    - Frontend roda em container Docker local
+# 
+# 2. FULL-STACK MODE - Frontend + Backend juntos no Lambda
+#    - Deploy completo da aplicação Nuxt no Lambda
+#    - Frontend e Backend juntos
+# 
+# =============================================================================
+
 service: rag-chatbot-mvp
 frameworkVersion: '3'
+
+plugins:
+  - serverless-dotenv-plugin
 
 provider:
   name: aws
   runtime: nodejs18.x
   region: sa-east-1
+  timeout: 120  
+  memorySize: 512  
+  
   environment:
     OPENAI_API_KEY: ${env:OPENAI_API_KEY}
     QDRANT_URL: ${env:QDRANT_URL}
     QDRANT_API_KEY: ${env:QDRANT_API_KEY}
     QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
+    NODE_ENV: production
+
+# API-ONLY - Backend Lambda + Frontend Docker Local
+package:
+  individually: false
+  patterns:
+    # Excluir TUDO 
+    - '!**'
+    - '!node_modules/**'
+    - '!.nuxt/**'
+    - '!.git/**'
+    
+    # Incluir APENAS o essencial
+    - '.output/server/index.mjs'
+    - '.output/server/package.json'
+    - '.output/server/node_modules/**'
+    
+    # Excluir lixo dentro de node_modules do build
+    - '!.output/server/node_modules/**/*.md'
+    - '!.output/server/node_modules/**/*.ts'
+    - '!.output/server/node_modules/**/*.map'
+    - '!.output/server/node_modules/**/README*'
+    - '!.output/server/node_modules/**/LICENSE*'
+    - '!.output/server/node_modules/**/CHANGELOG*'
+    - '!.output/server/node_modules/**/.github/**'
+    - '!.output/server/node_modules/**/test/**'
+    - '!.output/server/node_modules/**/tests/**'
+    - '!.output/server/node_modules/**/__tests__/**'
+    - '!.output/server/node_modules/**/docs/**'
+    - '!.output/server/node_modules/**/examples/**'
 
 functions:
   api:
     handler: .output/server/index.handler
-    url:
-      cors: true
-      invokeMode: RESPONSE_STREAM  
-    timeout: 300
+    events:
+      # Bloquear rotas de frontend - só permite /api/*
+      - httpApi:
+          path: /api/{proxy+}
+          method: ANY
+      - httpApi:
+          path: /api/chat
+          method: POST
+      - httpApi:
+          path: /api/ingest
+          method: POST
+
+    # Alternativa com Function URL (para streaming) -> mas problema de forbbiden
+    # url:
+    #   cors: true
+    #   invokeMode: RESPONSE_STREAM
+    timeout: 120
     memorySize: 512
 
-plugins:
-  - serverless-dotenv-plugin
+# FULL-STACK - Frontend + Backend juntos no Lambda
+#  
+# package:
+#   patterns:
+#     # Incluir TODO o build Nuxt (frontend + backend)
+#     - '.output/**'
+#     
+#     # Excluir apenas desenvolvimento e configs
+#     - '!node_modules/**'
+#     - '!.nuxt/**'
+#     - '!assets/**'
+#     - '!components/**'
+#     - '!composables/**'
+#     - '!data/**'
+#     - '!pages/**'
+#     - '!scripts/**'
+#     - '!server/**'
+#     - '!public/**'
+#     - '!.env*'
+#     - '!.git/**'
+#     - '!.vscode/**'
+#     - '!*.md'
+#     - '!*.log'
+#     - '!.DS_Store'
+#     - '!tsconfig.json'
+#     - '!tailwind.config.js'
+#     - '!nuxt.config.ts'
+#     - '!app.vue'
+#     - '!pnpm-lock.yaml'
+#     - '!package.json'
+#     - '!serverless.yml'
+#     - '!Dockerfile*'
+#     - '!docker-compose.yml'
+# 
+# functions:
+#   nuxt:
+#     handler: .output/server/index.handler
+#     url:
+#       cors: true
+#       invokeMode: RESPONSE_STREAM
+#     timeout: 120
+#     memorySize: 512
+#     events:
+#       - httpApi: '*'
+#
+#   ## Alternativa: somente httpApi (sem Function URL) -> nao da problema de forbidden mas nao aceita Stream 
+#   # nuxt:
+#   #   handler: .output/server/index.handler
+#   #   timeout: 120
+#   #   memorySize: 512
+#   #   events:
+#   #     - httpApi: '*'
+

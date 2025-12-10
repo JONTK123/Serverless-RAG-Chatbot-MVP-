@@ -34,6 +34,9 @@ export default defineEventHandler(async (event) => {
   // 6. Armazenar vetores no Qdrant
   // 7. Retornar resultado com número de chunks processados
   
+  // Forçar resposta JSON
+  setResponseHeader(event, 'Content-Type', 'application/json')
+  
   return {
     success: false,
     message: 'Ingest endpoint - a ser implementado',

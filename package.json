@@ -13,7 +13,12 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "ingest": "tsx scripts/ingest.ts",
-    "deploy": "pnpm build && serverless deploy"
+    "deploy": "pnpm build && serverless deploy",
+    "deploy:api": "pnpm build && serverless deploy --verbose",
+    "remove:api": "serverless remove",
+    "docker:dev": "docker-compose up",
+    "docker:build": "docker-compose up --build",
+    "docker:down": "docker-compose down"
   },
   "dependencies": {
     "@langchain/community": "^0.0.45",
