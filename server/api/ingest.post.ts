@@ -44,13 +44,19 @@ import { v4 as uuidv4 } from 'uuid'
 // Await similar to FastAPI
 // Event is similar to Request object in FastAPI(ASGI) -> body, headers, etc.
 export default defineEventHandler(async (event) => {
-  // CORS
+  // CORS headers (allow cross-origin requests from frontend)
+  // Force JSON response (prevents SSR from rendering HTML)
+  setResponseHeader(event, 'Content-Type', 'application/json')
   setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
   setResponseHeader(event, 'Access-Control-Allow-Methods', 'POST, OPTIONS')
   setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type')
-  // Force JSON response (prevents SSR from rendering HTML)
-  setResponseHeader(event, 'Content-Type', 'application/json')
-  
+
+  // Handle Preflight OPTIONS request immediately
+  if (event.method === 'OPTIONS') {
+    setResponseStatus(event, 204)
+    return null
+  }
+
   try {
     console.log('[INGEST] Starting PDF ingestion process')
     

@@ -1,9 +1,15 @@
 /**
  * API-Only Middleware
- * 
- * Ensures only /api/* routes work, completely blocking frontend SSR on Lambda.
- * Handles CORS preflight requests globally to prevent renderer crashes.
+ *
+ * Global CORS + bloqueio de rotas não /api.
  */
+
+import {
+  defineEventHandler,
+  setResponseHeader,
+  setResponseStatus,
+  getMethod
+} from 'h3'
 
 export default defineEventHandler((event) => {
   // 1. Global CORS handling (Essential for Lambda accessed from local/different domains)
@@ -15,7 +21,7 @@ export default defineEventHandler((event) => {
   // Handle Preflight OPTIONS request immediately
   if (getMethod(event) === 'OPTIONS') {
     setResponseStatus(event, 204)
-    return 'OK'
+    return null
   }
 
   // Skip strict API checks in local development

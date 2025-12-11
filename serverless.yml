@@ -2,14 +2,26 @@
 #
 # TWO MODES AVAILABLE:
 #
-# 1. API-ONLY MODE - Lambda backend + local frontend
+# 1. API-ONLY MODE - Lambda backend + local frontend -> HTTP API Gateway
 #    - Deploy only the Lambda API with streaming
 #    - Frontend runs locally
 #
-# 2. FULL-STACK MODE - Frontend + Backend on Lambda
+# 2. API-ONLY MODE - Lambda backend + local frontend -> Function URL
+#    - deploy only the Lambda API with streaming
+#    - frontend runs locally
+#    - api base url is the function url
+#
+# 3. FULL-STACK MODE - Frontend + Backend on Lambda -> HTTP API Gateway OU Function URL
 #    - Deploy full Nuxt app (SSR) on Lambda
 #    - Frontend and Backend together
+# =========================================================================================== #
 
+
+
+
+
+
+# 1. API-ONLY MODE - Lambda backend + local frontend -> HTTP API Gateway
 service: rag-chatbot-mvp
 frameworkVersion: '3'
 
@@ -20,7 +32,7 @@ provider:
   name: aws
   runtime: nodejs18.x
   region: sa-east-1
-  timeout: 120  
+  timeout: 30 
   memorySize: 512  
   
   environment:
@@ -30,7 +42,6 @@ provider:
     QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
     NODE_ENV: production
 
-# API-ONLY - Lambda backend + local frontend
 package:
   individually: false
   patterns:
@@ -65,23 +76,69 @@ functions:
     events:
       # Block frontend routes - allow only /api/*
       - httpApi:
-          path: /api/{proxy+}
+          path: /api/chat
           method: ANY
       - httpApi:
-          path: /api/chat
-          method: POST
-      - httpApi:
           path: /api/ingest
-          method: POST
+          method: ANY
 
-    # Function URL alternative (for streaming) -> can lead to forbidden issues
-    # url:
-    #   cors: true
-    #   invokeMode: RESPONSE_STREAM
-    timeout: 120
-    memorySize: 512
 
-# FULL-STACK - Frontend + Backend juntos no Lambda
+
+
+
+
+
+
+
+
+
+
+# 2. API-ONLY MODE - Lambda backend + local frontend -> Function URL
+# provider:
+#   name: aws
+#   runtime: nodejs18.x
+#   region: sa-east-1
+#   timeout: 30
+#   memorySize: 512
+  
+#   environment:
+#     OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+#     QDRANT_URL: ${env:QDRANT_URL}
+#     QDRANT_API_KEY: ${env:QDRANT_API_KEY}
+#     QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
+#     NODE_ENV: production
+
+# functions:
+#   api:
+#     handler: .output/server/index.handler
+#     url:
+#       cors: true
+#       invokeMode: RESPONSE_STREAM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 3. FULL-STACK MODE - Frontend + Backend on Lambda -> HTTP API Gateway OU Function URL
 #  
 # package:
 #   patterns:
@@ -126,11 +183,11 @@ functions:
 #     events:
 #       - httpApi: '*'
 #
-#   ## Alternativa: somente httpApi (sem Function URL) -> nao da problema de forbidden mas nao aceita Stream 
-#   # nuxt:
-#   #   handler: .output/server/index.handler
-#   #   timeout: 120
-#   #   memorySize: 512
-#   #   events:
-#   #     - httpApi: '*'
+#   # Alternativa: somente httpApi (sem Function URL) 
+#   nuxt:
+#     handler: .output/server/index.handler
+#     timeout: 120
+#     memorySize: 512
+#     events:
+#       - httpApi: '*'
 
