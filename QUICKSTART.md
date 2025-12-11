@@ -6,7 +6,7 @@ git clone https://github.com/JONTK123/Serverless-RAG-Chatbot-MVP-.git
 cd Serverless-RAG-Chatbot-MVP-
 
 # Instale as dependências
-npm install
+pnpm install
 ```
 
 ### 2. Configure Variáveis de Ambiente
@@ -48,7 +48,7 @@ git checkout -b 111225-streaming-refactor
 git checkout develop
 
 # Execute o servidor de desenvolvimento
-npm run dev
+pnpm dev
 
 # Acesse: http://localhost:3000
 ```
@@ -77,84 +77,44 @@ git push origin 081225-project-setup
 # 6. Crie Pull Request no GitHub para develop
 ```
 
-## 📚 Ordem de Implementação
-
-Siga esta ordem para evitar bloqueios:
-
-1. **081225-project-setup** → Setup inicial completo
-2. **091225-rag-ingestion-script** → Script de ingestão de PDF
-3. **091225-backend-logic** → API e lógica RAG
-4. **101225-frontend-ui** → Interface do chat
-5. **111225-streaming-refactor** → Streaming de respostas
-
-## 📖 Documentação Completa
-
-- **README.md** → Documentação completa do projeto
-- **BRANCHES.md** → Detalhes de cada branch e checklist
-- **scripts/README.md** → Como usar o script de ingestão
-
 ## 🔧 Comandos Úteis
 
 ```bash
 # Desenvolvimento
-npm run dev              # Servidor de desenvolvimento
-npm run build            # Build para produção
-npm run preview          # Preview da build
+pnpm dev                # Servidor de desenvolvimento
+pnpm build              # Build para produção
+pnpm preview            # Preview da build
+pnpm generate           # Gera build estática
+
+# Lint
+pnpm lint               # Verifica padrões de código
+pnpm lint:fix           # Corrige problemas de lint automaticamente
 
 # Ingestão de dados
-npm run ingest           # Processar PDF para Qdrant
+pnpm ingest             # Processar PDF para Qdrant
 
-# Deploy
-npm run deploy           # Deploy para AWS Lambda
+# Deploy (build + deploy da API com variáveis carregadas)
+set -a && source .env && set +a && pnpm run deploy:api   # carrega env + build + deploy
+set -a && source .env && set +a && pnpm run remove:api   # carrega env + remove lambda 
+pnpm run deploy                                           # Deploy para AWS Lambda
+pnpm run deploy:api                                       # Deploy detalhado da API
+pnpm run remove:api                                       # Remove a API do ambiente
+
+# Serverless Framework (backend Lambda)
+serverless deploy                        # Deploy do backend na AWS Lambda
+serverless deploy --verbose              # Deploy detalhado do backend
+serverless remove                        # Remove o backend da AWS Lambda
+set -a && source .env && set +a && serverless logs -f api --startTime 10m  # Logs últimos 10 minutos
+serverless logs -f api --startTime 1h    # Última 1 hora
+serverless logs -f api --startTime 24h   # Últimas 24 horas
+serverless logs -f api --tail            # Seguir logs em tempo real
+serverless logs -f api --filter "ERROR"  # Filtrar apenas erros
+
+# Frontend local apontando para a Lambda (ajuste a URL do deploy)
+API_BASE_URL=https://7aq993qjt5.execute-api.sa-east-1.amazonaws.com/api pnpm dev --host 0.0.0.0
 
 # Git
 git branch -a            # Ver todas as branches
 git status               # Status atual
 git log --oneline -10    # Últimos 10 commits
 ```
-
-## ❓ Problemas Comuns
-
-### Erro: "Cannot find module..."
-```bash
-# Limpe e reinstale
-rm -rf node_modules
-npm install
-```
-
-### Erro: "Port 3000 already in use"
-```bash
-# Mate o processo na porta 3000
-lsof -ti:3000 | xargs kill -9
-
-# Ou use outra porta
-PORT=3001 npm run dev
-```
-
-### Erro: Git push failed
-```bash
-# Certifique-se de estar na branch correta
-git branch --show-current
-
-# Configure upstream se necessário
-git push -u origin nome-da-branch
-```
-
-## 🆘 Precisa de Ajuda?
-
-1. Consulte **README.md** para documentação completa
-2. Veja **BRANCHES.md** para detalhes das branches
-3. Leia os comentários nos arquivos de código
-4. Cada arquivo tem um comentário indicando em qual branch será implementado
-
-## 🎉 Pronto!
-
-Agora você está pronto para começar a codificar! Lembre-se:
-
-- ✅ Sempre partir de `develop`
-- ✅ Usar Conventional Commits
-- ✅ Criar PR para code review
-- ✅ Testar antes do push
-- ✅ Seguir a ordem de implementação
-
-**Boa codificação! 🚀**

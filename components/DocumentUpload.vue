@@ -177,8 +177,36 @@ const uploadDocument = async () => {
   uploadProgress.value = 0
 
   try {
-    const formData = new FormData()
-    formData.append('file', selectedFile.value)
+    const userId = localStorage.getItem('userId')
+    console.log('[UPLOAD] Iniciando upload')
+    console.log('[UPLOAD] API base:', useRuntimeConfig().public.apiBase)
+    console.log('[UPLOAD] User ID:', userId || 'anonymous')
+
+    // Converter arquivo para Base64
+    const reader = new FileReader()
+    const fileBase64Promise = new Promise((resolve, reject) => {
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          // Remover prefixo "data:application/pdf;base64,"
+          const base64String = reader.result.split(',')[1]
+          console.log('[UPLOAD] Base64 length:', base64String.length)
+          resolve(base64String)
+        } else {
+          reject(new Error('Failed to convert file to base64'))
+        }
+      }
+      reader.onerror = reject
+      reader.readAsDataURL(selectedFile.value)
+    })
+
+    const base64Content = await fileBase64Promise
+
+    // Preparar payload JSON
+    const payload = {
+      body: base64Content,
+      userId: userId || undefined
+    }
+    console.log('[UPLOAD] Payload pronto. Enviando para /ingest')
 
     // Simular progresso
     const progressInterval = setInterval(() => {
@@ -187,10 +215,14 @@ const uploadDocument = async () => {
       }
     }, 500)
 
-    const response = await fetch('/api/ingest', {
+    const response = await fetch(`${useRuntimeConfig().public.apiBase}/ingest`, {
       method: 'POST',
-      body: formData,
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload),
     })
+    console.log('[UPLOAD] Status da resposta:', response.status)
 
     clearInterval(progressInterval)
     uploadProgress.value = 100
@@ -207,11 +239,13 @@ const uploadDocument = async () => {
       throw new Error('Erro ao fazer upload')
     }
   } catch (error) {
+    console.error('Erro no upload:', error)
     uploadStatus.value = 'error'
-    uploadMessage.value = 'Erro ao processar documento. Tente novamente.'
-    setTimeout(() => {
-      uploadStatus.value = null
-    }, 5000)
+    uploadMessage.value = `Erro: ${error instanceof Error ? error.message : String(error)}`
+    // Não limpar erro automaticamente para permitir leitura
+    // setTimeout(() => {
+    //   uploadStatus.value = null
+    // }, 5000)
   }
 }
 </script>

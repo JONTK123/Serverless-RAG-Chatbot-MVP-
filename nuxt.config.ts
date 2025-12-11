@@ -1,20 +1,12 @@
-// =============================================================================
-// NUXT CONFIGURATION - RAG CHATBOT MVP
-// =============================================================================
-// 
-// DOIS MODOS DISPONÍVEIS:
-// 
-// 1. API-ONLY MODE (ATIVO) - Backend Lambda + Frontend Docker Local
-//    - Nitro configurado apenas para API com streaming
-//    - Frontend roda localmente via Docker
-//    - API_BASE_URL aponta para Lambda Function URL
-// 
-// 2. FULL-STACK MODE (COMENTADO) - Frontend + Backend juntos no Lambda
-//    - Build completo SSR para Lambda
-//    - Frontend e Backend juntos
-//    - Ativar descomentando a seção e comentando API-only
-// 
-// =============================================================================
+// 1. API-ONLY MODE - Lambda backend + local frontend
+//    - Nitro configured only for API with streaming
+//    - Frontend runs locally
+//    - API_BASE_URL points to the deployed Lambda
+//
+// 2. FULL-STACK MODE (COMMENTED) - Frontend + Backend on Lambda
+//    - Full SSR build for Lambda
+//    - Frontend and Backend together
+//    - Enable by uncommenting the section and disabling API-only
 
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
@@ -37,55 +29,51 @@ export default defineNuxtConfig({
     }
   },
 
-  // Configuração de runtime para variáveis de ambiente
+  // Runtime configuration for environment variables
   runtimeConfig: {
-    // Variáveis privadas (apenas servidor)
+    // Private variables (server only)
     openaiApiKey: process.env.OPENAI_API_KEY,
     qdrantUrl: process.env.QDRANT_URL,
     qdrantApiKey: process.env.QDRANT_API_KEY,
     qdrantCollectionName: process.env.QDRANT_COLLECTION_NAME || 'rag-chatbot-documents',
     
-    // Variáveis públicas (cliente + servidor)
+    // Public variables (client + server)
     public: {
-      // Em Docker local: usa Lambda URL
-      // Em Full-stack: usa /api relativo
+      // Local frontend: use Lambda URL via API_BASE_URL
+      // Full-stack: use relative /api
       apiBase: process.env.API_BASE_URL || '/api'
     }
   },
 
-  // ===========================================================================
-  // MODO 1: API-ONLY (ATIVO) - Backend Lambda com Streaming OTIMIZADO
-  // ===========================================================================
-  
-  // Desabilitar SSR para API pura (sem renderização de frontend)
-  ssr: false,
+  // MODE 1: API-ONLY (ACTIVE) - Lambda backend with streaming
+  // Disable SSR for API-only, except in local development
+  ssr: process.env.NODE_ENV === 'development',
   
   nitro: {
     preset: 'aws-lambda',
     
-    // API-only: não precisa servir assets estáticos
-    serveStatic: false,
+    // API-only: no static assets (except in dev)
+    serveStatic: process.env.NODE_ENV === 'development',
     
-    // 🔥 OTIMIZAÇÕES AGRESSIVAS PARA REDUZIR TAMANHO
-    
-    // Inline para reduzir tamanho do bundle
+    // Aggressive size optimizations
+    // Inline to reduce bundle size
     inlineDynamicImports: true,
     
-    // Minificar para otimizar tamanho
+    // Minify to reduce size
     minify: true,
     
-    // Remover mapas de fonte do server bundle
+    // Remove source maps from server bundle
     sourceMap: false,
     
-    // Compilar apenas rotas de API (sem SSR)
+    // Compile only API routes (no SSR)
     prerender: {
       crawlLinks: false,
       routes: []
     },
     
-    // 🔥 Forçar Rollup a ser agressivo
+    // Force Rollup to be aggressive
     rollupConfig: {
-      // Tree-shake deve ficar no nível raiz do rollupConfig, não dentro de output
+      // Tree-shake must be at rollupConfig root, not inside output
       treeshake: {
         propertyReadSideEffects: false,
         tryCatchDeoptimization: false,
@@ -93,34 +81,32 @@ export default defineNuxtConfig({
       },
       output: {
         format: 'esm',
-        // Remover inline de sourcemaps
+        // Remove inline sourcemaps
         sourcemap: false
       }
     }
   },
 
-  // ===========================================================================
-  // MODO 2: FULL-STACK (COMENTADO) - Frontend + Backend no Lambda
-  // ===========================================================================
+  // MODE 2: FULL-STACK (COMMENTED) - Frontend + Backend on Lambda
   // 
-  // Para ativar: descomente esta seção e comente a seção MODO 1 acima
+  // To enable: uncomment this section and disable MODE 1 above
   // 
   // nitro: {
   //   preset: 'aws-lambda',
   //   
-  //   // Full-stack: servir assets estáticos (CSS, JS, imagens)
+  //   // Full-stack: serve static assets (CSS, JS, images)
   //   serveStatic: true,
   //   
-  //   // Inline para reduzir tamanho do bundle
+  //   // Inline to reduce bundle size
   //   inlineDynamicImports: true,
   //   
-  //   // Minificar para otimizar tamanho
+  //   // Minify to reduce size
   //   minify: true,
   //   
-  //   // Pré-renderizar rotas estáticas se necessário
+  //   // Pre-render static routes if needed
   //   prerender: {
   //     crawlLinks: false,
-  //     routes: ['/']  // Homepage pode ser pré-renderizada
+  //     routes: ['/']  // Homepage can be pre-rendered
   //   }
   // },
 
