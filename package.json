@@ -25,14 +25,18 @@
     "@langchain/core": "^0.1.52",
     "@langchain/openai": "^0.0.25",
     "@qdrant/js-client-rest": "^1.8.2",
+    "@types/busboy": "^1.5.4",
+    "busboy": "^1.6.0",
     "langchain": "^0.1.30",
     "nuxt": "^3.10.3",
+    "pdf-parse": "^1.1.1",
     "uuid": "^9.0.1",
     "vue": "^3.4.21"
   },
   "devDependencies": {
     "@nuxtjs/tailwindcss": "^6.11.4",
     "@types/node": "^20.19.26",
+    "@types/pdf-parse": "^1.1.5",
     "@types/uuid": "^9.0.7",
     "dotenv": "^16.4.5",
     "eslint": "^8.57.0",

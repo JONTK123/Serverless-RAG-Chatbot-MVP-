@@ -137,7 +137,7 @@ Seu Projeto
 
 **Build & Deploy:**
 ```
-npm run build
+pnpm run build
          ↓
     .output/
     ├── public/      ← Assets estáticos (JS, CSS)
@@ -192,7 +192,7 @@ Usuario acessa: https://api.lambda.amazonaws.com/
 **Build Diferenciado:**
 ```bash
 # Frontend: Build estático
-npm run build:frontend
+pnpm run build:frontend
     ↓
 dist/
 ├── index.html
@@ -203,7 +203,7 @@ dist/
 Upload para S3 → CloudFront (CDN)
 
 # Backend: API isolada
-npm run build:api
+pnpm run build:api
     ↓
 .output-api/
 ├── server/
@@ -282,7 +282,7 @@ Usuario acessa: https://estáticos.com
 
 **Por que ambos vão juntos para Lambda atualmente?**
 
-Quando você executa `npm run build` no Nuxt:
+Quando você executa `pnpm run build` no Nuxt:
 
 1. Nuxt compila o Vue em componentes reativos
 2. Nuxt compila o `/server` em módulos Node.js
@@ -660,7 +660,7 @@ Objetivo: gerar chaves para o Serverless Framework atuar na conta.
 ##### Fase 3: Configurar o "crachá" no Serverless Framework
 Objetivo: instalar a ferramenta e armazenar as credenciais localmente.
 ```bash
-npm install -g serverless
+pnpm add -g serverless
 serverless config credentials --provider aws --key SUA_ACCESS_KEY --secret SUA_SECRET_KEY
 ```
 *Esse comando salva em `~/.aws/credentials` para o Serverless usar sempre. Não vai para o repo.*
@@ -1444,8 +1444,8 @@ mkdir -p layers/langchain/nodejs
 
 # 2. Navegar e instalar deps
 cd layers/langchain/nodejs
-npm init -y
-npm install langchain @langchain/core @langchain/community @langchain/openai
+pnpm init -y
+pnpm add langchain @langchain/core @langchain/community @langchain/openai
 
 # 3. Compactar (a estrutura AWS espera nodejs/node_modules)
 cd ..
@@ -1535,3 +1535,728 @@ Serverless-RAG-Chatbot-MVP-/
     └── css/
         └── main.css             # CSS global
 ```
+
+---
+
+## 8. HTTP API vs REST API no AWS API Gateway
+
+### Diferenças Principais
+
+#### HTTP API (Usado no Projeto)
+- **Mais novo**: Lançado em 2019
+- **Mais barato**: Até 70% mais barato que REST API
+- **Mais rápido**: Menor latência
+- **Mais simples**: Menos features, mais focado
+- **Limitações**:
+  - Não suporta `multipart/form-data` nativamente
+  - Binários são automaticamente codificados em base64
+  - Menos opções de autorização
+  - Sem API Keys nativas
+
+#### REST API (Versão Antiga)
+- **Mais antigo**: Disponível desde o início
+- **Mais caro**: Preço mais alto por requisição
+- **Mais features**: Suporte completo a binários, API Keys, etc.
+- **Mais complexo**: Mais opções de configuração
+- **Vantagens**:
+  - Suporta `multipart/form-data` nativamente
+  - Não codifica binários automaticamente
+  - API Keys integradas
+  - Mais opções de autorização
+
+### Por Que HTTP API Codifica em Base64?
+
+Quando você usa HTTP API e envia dados binários (como PDF):
+
+1. **API Gateway detecta dados binários**
+2. **Codifica automaticamente em base64**
+3. **Define `event.isBase64Encoded = true`**
+4. **Passa para Lambda já codificado**
+
+### Exemplo do Fluxo
+
+```
+Cliente → PDF (binário) → API Gateway → Base64 → Lambda → Precisa decodificar
+```
+
+### Solução Correta para HTTP API
+
+#### ❌ Solução ERRADA (mudar para REST API)
+```yaml
+events:
+  - http:  # ← REST API
+      path: /api/ingest
+      method: POST
+```
+
+**Problemas**:
+- Mais caro (70% mais caro)
+- Perde benefícios de performance
+- Não resolve o problema real
+
+#### ✅ Solução CORRETA (decodificar base64)
+
+**No Cliente** (opcional - pode enviar binário normal):
+```typescript
+// Opção 1: Enviar binário direto (deixar API Gateway codificar)
+const formData = new FormData()
+formData.append('file', pdfFile)
+await fetch('/api/ingest', { method: 'POST', body: formData })
+
+// Opção 2: Codificar manualmente (mais controle)
+const base64 = Buffer.from(pdfBuffer).toString('base64')
+await fetch('/api/ingest', {
+  method: 'POST',
+  body: JSON.stringify({ body: base64 }),
+  headers: { 'Content-Type': 'application/json' }
+})
+```
+
+**Na Lambda** (sempre necessário com HTTP API):
+```typescript
+// Detectar se está codificado em base64
+if (event.isBase64Encoded) {
+  // Decodificar antes de processar
+  const buffer = Buffer.from(event.body, 'base64')
+  // Processar buffer decodificado
+}
+```
+
+### Implementação no Nuxt com h3
+
+#### Problema Identificado
+
+No nosso caso, usamos `readMultipartFormData` do h3, que não sabe que o API Gateway já codificou em base64. Então:
+
+1. Cliente envia PDF binário
+2. API Gateway codifica em base64
+3. h3 recebe base64 mas trata como binário
+4. Resultado: dados corrompidos (650893 bytes ao invés de 373035)
+
+#### Solução
+
+```typescript
+import { defineEventHandler, readRawBody } from 'h3'
+
+export default defineEventHandler(async (event) => {
+  // Obter o evento Lambda original
+  const lambdaEvent = event.node.req
+
+  // Verificar se está codificado em base64
+  if (lambdaEvent.isBase64Encoded) {
+    // Ler o body raw e decodificar
+    const rawBody = await readRawBody(event)
+    const decodedBody = Buffer.from(rawBody, 'base64')
+    
+    // Agora processar o multipart do body decodificado
+    // ... parsear multipart manualmente ou usar biblioteca
+  } else {
+    // Processar normalmente
+    const body = await readMultipartFormData(event)
+  }
+})
+```
+
+### Comparação de Custos
+
+#### Cenário: 1 milhão de requests/mês
+
+**HTTP API**:
+- Custo: ~$1.00/milhão requests
+- Total: $1.00/mês
+
+**REST API**:
+- Custo: ~$3.50/milhão requests
+- Total: $3.50/mês
+
+**Economia com HTTP API**: 70% ($2.50/mês)
+
+### Quando Usar Cada Um?
+
+#### Use HTTP API quando:
+- ✅ Custo é prioridade
+- ✅ Performance é crítica
+- ✅ Não precisa de features avançadas
+- ✅ Pode implementar encoding/decoding
+- ✅ API simples REST/GraphQL
+
+#### Use REST API quando:
+- ✅ Precisa de API Keys nativas
+- ✅ Precisa de authorizers complexos
+- ✅ Precisa de request/response transformation
+- ✅ Não quer lidar com base64
+- ✅ Usa muito multipart/form-data
+
+### Recomendação para o Projeto
+
+**Manter HTTP API** por:
+1. **Custo**: 70% mais barato
+2. **Performance**: Menor latência
+3. **Modernidade**: Arquitetura mais nova
+4. **Solução Simples**: Apenas decodificar base64
+
+A solução de decodificação base64 é simples e resolve o problema completamente, mantendo todos os benefícios do HTTP API.
+
+### Referências
+
+- [AWS HTTP APIs vs REST APIs](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html)
+- [Working with Binary Media Types](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-payload-encodings.html)
+- [StackOverflow: Post PDF to AWS Lambda](https://stackoverflow.com/questions/57121011/how-can-i-post-a-pdf-to-aws-lambda)
+
+---
+
+## 9. Problemas Identificados na Rota de Ingestão de PDF
+
+### Data: 2025-12-10
+
+#### Resumo Executivo
+Durante os testes da rota `/api/ingest` com o arquivo `thiago_relatorio.pdf`, foram identificados diversos problemas relacionados ao parsing de PDF no ambiente AWS Lambda e ao tratamento de dados multipart/form-data.
+
+---
+
+### 1. Lambda não conseguiu ler o PDF - Necessidade de salvar em /tmp
+
+#### Problema
+O PDFLoader do LangChain não conseguiu processar o PDF diretamente do Buffer recebido via multipart/form-data. Foi necessário salvar temporariamente em `/tmp`.
+
+#### Causa
+- O PDFLoader espera um caminho de arquivo ou Blob válido
+- Buffer recebido via h3's `readMultipartFormData` não é diretamente compatível com PDFLoader
+- No ambiente Lambda, o sistema de arquivos é read-only exceto `/tmp`
+
+#### Tentativas de Solução
+1. **Tentativa 1**: Converter Buffer para Blob
+   ```typescript
+   const pdfBlob = new Blob([filePart.data], { type: 'application/pdf' })
+   const loader = new PDFLoader(pdfBlob)
+   ```
+   **Resultado**: Falhou com erro de tipo
+
+2. **Tentativa 2**: Converter Buffer para Uint8Array antes do Blob
+   ```typescript
+   const pdfBlob = new Blob([new Uint8Array(filePart.data)], { type: 'application/pdf' })
+   ```
+   **Resultado**: Falhou com mesmo erro
+
+3. **Solução Final**: Salvar temporariamente em `/tmp`
+   ```typescript
+   const tempFilePath = join('/tmp', `upload-${Date.now()}.pdf`)
+   writeFileSync(tempFilePath, pdfBuffer)
+   const loader = new PDFLoader(tempFilePath)
+   ```
+   **Resultado**: PDF carregado com sucesso, mas com problemas de parsing
+
+---
+
+### 2. Problema de Parsing do PDF - Biblioteca pdf-parse
+
+#### Problema
+A biblioteca PDFLoader do LangChain usa pdf-parse internamente, que estava gerando warnings de stream corrompido:
+```
+Warning: Invalid stream: "FormatError: Bad FCHECK in flate stream: 120, 239"
+```
+
+#### Causa
+- O PDF `thiago_relatorio.pdf` tem streams de compressão que o pdf-parse interpreta como corrompidos
+- Localmente funciona perfeitamente (7516 caracteres extraídos)
+- No Lambda, apenas 10 caracteres (quebras de linha) foram extraídos
+
+#### Logs
+```
+2025-12-10 15:21:08.793	INFO	PDF buffer size: 650893
+2025-12-10 15:21:09.530	INFO	PDF pages: 5
+2025-12-10 15:21:09.530	INFO	Text length: 10
+```
+
+#### Tentativas de Solução
+1. Usar PDFLoader com opções padrão
+2. Usar pdf-parse diretamente com opções customizadas
+3. Ambas falharam no ambiente Lambda
+
+---
+
+### 3. Collection do Qdrant Não Existia
+
+#### Problema
+A collection `rag-chatbot-documents` não existia no Qdrant Cloud, causando erro `Not Found`.
+
+#### Causa
+- Collection precisa ser criada antes de tentar fazer upsert
+- Qdrant não cria collections automaticamente
+
+#### Solução
+Script de teste executado:
+```javascript
+const qdrant = new QdrantClient({
+  url: process.env.QDRANT_URL,
+  apiKey: process.env.QDRANT_API_KEY
+});
+
+await qdrant.createCollection('rag-chatbot-documents', {
+  vectors: {
+    size: 1536, // OpenAI embeddings dimension
+    distance: 'Cosine'
+  }
+});
+```
+
+**Resultado**: Collection criada com sucesso
+
+---
+
+### 4. Erro "No text content found in PDF"
+
+#### Problema
+Após resolver o problema da collection, o erro mudou para "No text content found in PDF".
+
+#### Causa
+- PDF estava sendo processado, mas apenas 10 caracteres (quebras de linha) foram extraídos
+- Problema específico do ambiente Lambda com pdf-parse
+- Localmente: 7516 caracteres extraídos corretamente
+- Lambda: 10 caracteres (apenas `\n\n\n\n\n\n\n\n\n\n`)
+
+#### Logs Comparativos
+**Local**:
+```
+✅ PDF parsed successfully!
+Pages: 5
+Text length: 7516
+```
+
+**Lambda**:
+```
+INFO	PDF pages: 5
+INFO	Text length: 10
+```
+
+---
+
+### 5. Erro ao Ler Buffer do PDF no Lambda
+
+#### Problema
+O buffer estava chegando com tamanho incorreto: **650893 bytes** ao invés de **373035 bytes** (quase o dobro).
+
+#### Causa
+- O multipart/form-data estava incluindo metadados adicionais no buffer
+- h3's `readMultipartFormData` retorna dados que podem incluir boundaries e headers
+
+#### Logs
+```
+INFO	PDF buffer size: 650893
+INFO	First 10 bytes: 255044462d312e370d0a  (%PDF-1.7)
+INFO	Last 10 bytes: 3835320d0a2525454f46  (%%EOF)
+```
+
+**Observação**: Apesar dos primeiros e últimos bytes estarem corretos (`%PDF-1.7` e `%%EOF`), o tamanho total estava incorreto.
+
+#### Tentativas de Solução
+1. **Tentativa 1**: Extrair PDF do buffer buscando `%PDF` e `%%EOF`
+   ```typescript
+   const pdfStart = pdfBuffer.indexOf('%PDF')
+   const pdfEnd = pdfBuffer.lastIndexOf('%%EOF')
+   if (pdfStart !== -1 && pdfEnd !== -1) {
+     pdfBuffer = pdfBuffer.slice(pdfStart, pdfEnd + 5)
+   }
+   ```
+   **Resultado**: Tamanho continuou 650893 bytes
+
+---
+
+### 6. Erro com Multipart Form Data - Metadados do filePart
+
+#### Problema
+O `filePart.data` do multipart form data contém mais dados do que apenas o PDF.
+
+#### Causa Raiz Identificada
+Após análise do StackOverflow (https://stackoverflow.com/questions/57121011/how-can-i-post-a-pdf-to-aws-lambda), descobrimos que:
+
+1. **API Gateway HTTP API vs REST API**:
+   - HTTP API não suporta `multipart/form-data` nativamente
+   - Dados são codificados em base64 automaticamente
+   - Precisa decodificar antes de usar
+
+2. **Problema com h3's `readMultipartFormData`**:
+   - Pode estar recebendo dados já transformados pelo API Gateway
+   - Buffer pode conter encoding adicional
+
+#### Logs de Debug
+```typescript
+console.log('File part:', {
+  name: filePart.name,        // 'file'
+  filename: filePart.filename, // 'thiago_relatorio.pdf'
+  type: filePart.type,        // 'application/pdf'
+  dataLength: 650893,         // ❌ Deveria ser 373035
+  dataType: 'object',
+  isBuffer: true
+})
+```
+
+---
+
+### Solução Proposta pelo StackOverflow
+
+#### Problema Principal
+API Gateway HTTP API não suporta `multipart/form-data` diretamente. Quando você faz POST de um PDF:
+
+1. API Gateway detecta binário
+2. Codifica em base64 automaticamente
+3. Passa para Lambda já codificado
+4. É necessário decodificar na Lambda
+
+#### Solução Correta
+
+**Opção 1: Usar REST API ao invés de HTTP API**
+```yaml
+# serverless.yml
+functions:
+  api:
+    handler: .output/server/index.handler
+    events:
+      - http:  # ← REST API ao invés de httpApi
+          path: /api/ingest
+          method: POST
+```
+
+**Opção 2: Decodificar base64 na Lambda**
+```typescript
+// Detectar se é base64
+if (event.isBase64Encoded) {
+  const buffer = Buffer.from(event.body, 'base64')
+  // Parsear multipart manualmente ou usar biblioteca como busboy
+}
+```
+
+**Opção 3: Usar S3 Presigned URL (Recomendado para arquivos grandes)**
+1. Cliente solicita presigned URL
+2. Cliente faz upload direto para S3
+3. Lambda é trigada por evento S3
+4. Lambda processa arquivo de S3
+
+---
+
+### Status Atual dos Testes
+
+#### ✅ Funcionando
+- Deploy da Lambda
+- Connection com Qdrant
+- Collection criada
+- Variáveis de ambiente configuradas
+- Rota acessível
+- Upload do arquivo sendo recebido
+
+#### ❌ Não Funcionando (ANTES da solução)
+- Parsing correto do PDF (10 chars ao invés de 7516)
+- Tamanho correto do buffer (650893 ao invés de 373035)
+- Extração de texto completo
+
+#### 📊 Estatísticas (ANTES da solução)
+- **PDF Original**: 373035 bytes, 5 páginas, 7516 caracteres
+- **Buffer Recebido**: 650893 bytes (174% maior)
+- **Texto Extraído**: 10 caracteres (0.13% do esperado)
+- **Taxa de Sucesso Local**: 100%
+- **Taxa de Sucesso Lambda**: 0%
+
+#### ✅ Status DEPOIS da Solução Base64
+- **Buffer Recebido**: 373035 bytes ✅ (correto)
+- **Texto Extraído**: 7516 caracteres ✅ (correto)
+- **Taxa de Sucesso Lambda**: 100% ✅
+
+---
+
+### Próximos Passos
+
+1. ✅ **RESOLVIDO**: Implementar solução do StackOverflow (base64)
+2. Testar com PDF mais simples sem compressão
+3. Considerar usar S3 Presigned URL para produção
+4. Adicionar logging mais detalhado do processo multipart
+5. Implementar fallback para diferentes formatos de PDF
+
+---
+
+### 4. CORS para ingestão via frontend
+
+Para permitir que o frontend local (http://localhost:3000) chame a Lambda em `API_BASE_URL`, configuramos CORS diretamente no handler de ingestão (`server/api/ingest.post.ts`):
+- `Access-Control-Allow-Origin: *`
+- `Access-Control-Allow-Methods: POST, OPTIONS`
+- `Access-Control-Allow-Headers: Content-Type`
+- Resposta imediata para `OPTIONS` com `OK`.
+
+Assim, basta definir `API_BASE_URL` apontando para a URL da API e o upload funciona sem ajustes adicionais no frontend.
+
+### 5. Problema de Formato de Point ID no Qdrant
+
+#### Problema
+Ao tentar fazer upload de PDFs via rota `/api/ingest`, a API retornava erro `Bad Request` do Qdrant:
+```
+ApiError: Bad Request
+Format error in JSON body: value test-user-python-1765402104281-0 is not a valid point ID, 
+valid values are either an unsigned integer or a UUID
+```
+
+#### Causa
+O código estava gerando IDs de pontos (vectors) no formato `${documentId}-${index}` (ex: `test-user-python-1765402104281-0`), mas o **Qdrant requer que Point IDs sejam exclusivamente UUIDs ou números inteiros não assinados**. Strings arbitrárias não são aceitas.
+
+#### Solução Implementada
+Foi adicionado o import da biblioteca `uuid` e alterado o código para gerar UUIDs válidos para cada chunk:
+
+```typescript
+import { v4 as uuidv4 } from 'uuid'
+
+// Antes (ERRADO):
+const points = chunks.map((chunk, idx) => ({
+  id: `${documentId}-${idx}`, // ❌ Formato inválido
+  vector: vectors[idx],
+  payload: { ... }
+}))
+
+// Depois (CORRETO):
+const points = chunks.map((chunk, idx) => ({
+  id: uuidv4(), // ✅ UUID válido
+  vector: vectors[idx],
+  payload: { ... }
+}))
+```
+
+#### Como Identificar o Problema
+1. **Logs da Lambda**: Use `serverless logs -f api --startTime 10m` para ver os erros detalhados
+2. **Teste Local**: Execute `pnpm dev` e teste a rota localmente - o erro aparece igual
+3. **Mensagem de Erro**: O Qdrant retorna explicitamente o formato esperado na mensagem de erro
+
+#### Status
+✅ **RESOLVIDO** - A rota `/api/ingest` agora funciona corretamente tanto localmente quanto no Lambda.
+
+---
+
+### Lições Aprendidas
+
+1. **API Gateway HTTP API vs REST API**: Diferenças críticas no tratamento de binários
+2. **Multipart no Lambda**: Requer tratamento especial
+3. **pdf-parse no Lambda**: Sensível a compressão de PDF
+4. **Testes Locais vs Lambda**: Comportamento diferente com bibliotecas de parsing
+5. **Qdrant**: Collection deve ser criada previamente
+6. **Buffer Size**: Verificar sempre o tamanho real vs esperado
+7. **Qdrant Point IDs**: Devem ser UUIDs ou inteiros, nunca strings arbitrárias
+7. **Solução Base64**: Enviar PDF como JSON com base64 resolve completamente o problema
+
+---
+
+### Referências
+
+- [StackOverflow: How can I post a PDF to AWS lambda](https://stackoverflow.com/questions/57121011/how-can-i-post-a-pdf-to-aws-lambda)
+- [AWS API Gateway Binary Support](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-payload-encodings.html)
+- [Serverless Framework HTTP vs HTTP API](https://www.serverless.com/framework/docs/providers/aws/events/http-api)
+
+---
+
+## 10. Processamento de PDF: LangChain 100% vs Abordagem Híbrida
+
+### Contexto
+
+Para processar PDFs e gerar embeddings para RAG, existem duas abordagens principais:
+1. **LangChain 100%**: Usar `PDFLoader` do LangChain para tudo
+2. **Abordagem Híbrida**: Usar `pdf-parse` para extração + LangChain para chunks/embeddings
+
+Este projeto usa a **Abordagem Híbrida**. Aqui está o porquê.
+
+---
+
+### Abordagem 1: LangChain 100% (PDFLoader)
+
+```typescript
+import { PDFLoader } from 'langchain/document_loaders/fs/pdf'
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter'
+import { OpenAIEmbeddings } from '@langchain/openai'
+
+// 1. Salvar em /tmp (obrigatório)
+const tempFilePath = join('/tmp', `upload-${Date.now()}.pdf`)
+writeFileSync(tempFilePath, pdfBuffer)
+
+// 2. Carregar PDF com LangChain
+const loader = new PDFLoader(tempFilePath)
+const docs = await loader.load()  // Retorna Document[]
+
+// 3. Dividir em chunks (opcional, já vem dividido por página)
+const textSplitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 1000,
+  chunkOverlap: 200
+})
+const chunks = await textSplitter.splitDocuments(docs)
+
+// 4. Gerar embeddings
+const embeddings = new OpenAIEmbeddings({ openAIApiKey: apiKey })
+const vectors = await embeddings.embedDocuments(
+  chunks.map(c => c.pageContent)
+)
+
+// 5. Limpar arquivo
+unlinkSync(tempFilePath)
+```
+
+#### Características
+- **Aceita**: `string` (caminho de arquivo) ou `Blob`
+- **Não aceita**: `Buffer` diretamente
+- **Retorna**: `Document[]` do LangChain com metadados (página, etc)
+- **Requer**: Salvar arquivo em disco (`/tmp`)
+- **I/O de disco**: 2 operações (write + read)
+
+#### Vantagens
+- ✅ Tudo integrado no ecossistema LangChain
+- ✅ Metadados automáticos (número da página, etc)
+- ✅ API consistente para múltiplos formatos (PDF, Word, etc)
+- ✅ Splitting por página automático
+
+#### Desvantagens
+- ❌ Não aceita Buffer (requer arquivo físico)
+- ❌ I/O de disco desnecessário em Lambda
+- ❌ Mais lento (operações de escrita/leitura)
+- ❌ Pode falhar se `/tmp` estiver cheio
+- ❌ Código mais verboso (salvar, ler, limpar)
+- ❌ Bundle maior (PDFLoader + dependências)
+
+---
+
+### Abordagem 2: Híbrida (pdf-parse + LangChain) ✅ Atual
+
+```typescript
+import pdfParse from 'pdf-parse'
+import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter'
+import { OpenAIEmbeddings } from '@langchain/openai'
+
+// 1. Extrair texto com pdf-parse (direto do buffer)
+const pdfData = await pdfParse(pdfBuffer, { max: 0 })
+const text = pdfData.text
+
+// 2. Dividir em chunks com LangChain
+const textSplitter = new RecursiveCharacterTextSplitter({
+  chunkSize: 1000,
+  chunkOverlap: 200
+})
+const chunks = await textSplitter.splitText(text)
+
+// 3. Gerar embeddings com LangChain
+const embeddings = new OpenAIEmbeddings({ openAIApiKey: apiKey })
+const vectors = await embeddings.embedDocuments(chunks)
+```
+
+#### Características
+- **Aceita**: `Buffer` diretamente
+- **Não precisa**: Salvar arquivo em disco
+- **Retorna**: `string` simples com todo o texto
+- **I/O de disco**: 0 operações
+- **Performance**: Mais rápido (sem I/O)
+
+#### Vantagens
+- ✅ Aceita Buffer diretamente (perfeito para Lambda)
+- ✅ Sem I/O de disco (mais rápido)
+- ✅ Código mais simples (menos linhas)
+- ✅ Mais controle sobre parsing (opções customizadas)
+- ✅ Bundle menor (só pdf-parse)
+- ✅ Mesma qualidade de chunks e embeddings (usa LangChain)
+
+#### Desvantagens
+- ❌ Sem metadados automáticos de página
+- ❌ Precisa gerenciar pdf-parse separadamente
+- ❌ Não aproveita abstração do LangChain para extração
+
+---
+
+### Comparação Lado a Lado
+
+| Aspecto | LangChain 100% (PDFLoader) | Híbrida (pdf-parse + LangChain) |
+|---------|----------------------------|----------------------------------|
+| **Extração de texto** | PDFLoader (usa pdf-parse internamente) | pdf-parse direto |
+| **Aceita Buffer?** | ❌ Não (precisa arquivo/Blob) | ✅ Sim |
+| **I/O de disco** | ✅ Sim (write + read) | ❌ Não |
+| **Performance** | Mais lento | Mais rápido |
+| **Linhas de código** | ~15 linhas | ~8 linhas |
+| **Retorno** | `Document[]` (com metadados) | `string` simples |
+| **Metadados** | Automático (página, etc) | Manual (se precisar) |
+| **Complexidade** | Mais código (salvar/limpar) | Menos código |
+| **Controle** | Limitado | Total sobre parsing |
+| **Bundle size** | Maior (PDFLoader) | Menor (só pdf-parse) |
+| **Lambda-friendly** | ⚠️ Depende de `/tmp` | ✅ Stateless |
+| **Chunking** | LangChain ✅ | LangChain ✅ (igual) |
+| **Embeddings** | LangChain ✅ | LangChain ✅ (igual) |
+
+---
+
+### Por Que Escolhemos a Abordagem Híbrida?
+
+1. **Performance**: Sem I/O de disco = mais rápido
+2. **Simplicidade**: Menos código, menos complexidade
+3. **Lambda-friendly**: Não depende de `/tmp`, 100% stateless
+4. **Flexibilidade**: Controle total sobre parsing
+5. **Mantém LangChain onde importa**: Chunks e embeddings
+
+#### O que usamos de cada biblioteca
+
+```
+pdf-parse:
+  - Extração de texto do PDF
+  - Aceita Buffer diretamente
+  - Fornece metadados básicos (páginas, info)
+
+LangChain:
+  - RecursiveCharacterTextSplitter (chunking inteligente)
+  - OpenAIEmbeddings (geração de vetores)
+  - Não usamos: PDFLoader (substituído por pdf-parse)
+```
+
+---
+
+### Quando Usar Cada Abordagem?
+
+#### Use LangChain 100% (PDFLoader) quando:
+- Precisa de metadados automáticos de página
+- Quer tudo integrado no ecossistema LangChain
+- Não se importa com I/O de disco
+- Está em ambiente com sistema de arquivos estável
+- Processa múltiplos formatos (PDF, Word, TXT)
+
+#### Use Abordagem Híbrida (atual) quando:
+- Performance é importante
+- Está em Lambda ou ambiente serverless
+- Quer controle total sobre parsing
+- Quer código mais simples
+- Não precisa de metadados complexos de página
+- Quer bundle menor
+
+---
+
+### Código de Referência (Implementação Atual)
+
+```typescript
+// server/api/ingest.post.ts
+
+// Decodificar PDF de base64
+const pdfBuffer = Buffer.from(jsonBody.body, 'base64')
+
+// 1. Extrair texto com pdf-parse (direto do buffer)
+const pdfData = await pdfParse(pdfBuffer, { max: 0 })
+const text = pdfData.text
+
+// 2. Criar chunks com LangChain (AUTOMÁTICO)
+const textSplitter = new RecursiveCharacterTextSplitter({ 
+  chunkSize: 1000,
+  chunkOverlap: 200
+})
+const chunks = await textSplitter.splitText(text)
+
+// 3. Gerar embeddings com LangChain (AUTOMÁTICO)
+const embeddings = new OpenAIEmbeddings({ openAIApiKey: config.openaiApiKey })
+const vectors = await embeddings.embedDocuments(chunks)
+
+// 4. Salvar no Qdrant
+await qdrant.upsert(collectionName, { points: ... })
+```
+
+---
+
+### Conclusão
+
+A **Abordagem Híbrida** oferece o melhor dos dois mundos:
+- Extração rápida e eficiente com `pdf-parse`
+- Chunking e embeddings robustos com `LangChain`
+- Código simples, rápido e Lambda-friendly
+
+Você não perde nada importante (chunking e embeddings são idênticos), apenas ganha performance e simplicidade.

@@ -1,18 +1,14 @@
-# =============================================================================
 # SERVERLESS CONFIGURATION - RAG CHATBOT MVP
-# =============================================================================
-# 
-# DOIS MODOS DISPONÍVEIS:
-# 
-# 1. API-ONLY MODE - Somente Backend Lambda + Frontend Docker Local
-#    - Deploy apenas da API Lambda com streaming
-#    - Frontend roda em container Docker local
-# 
-# 2. FULL-STACK MODE - Frontend + Backend juntos no Lambda
-#    - Deploy completo da aplicação Nuxt no Lambda
-#    - Frontend e Backend juntos
-# 
-# =============================================================================
+#
+# TWO MODES AVAILABLE:
+#
+# 1. API-ONLY MODE - Lambda backend + local frontend
+#    - Deploy only the Lambda API with streaming
+#    - Frontend runs locally
+#
+# 2. FULL-STACK MODE - Frontend + Backend on Lambda
+#    - Deploy full Nuxt app (SSR) on Lambda
+#    - Frontend and Backend together
 
 service: rag-chatbot-mvp
 frameworkVersion: '3'
@@ -34,22 +30,22 @@ provider:
     QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
     NODE_ENV: production
 
-# API-ONLY - Backend Lambda + Frontend Docker Local
+# API-ONLY - Lambda backend + local frontend
 package:
   individually: false
   patterns:
-    # Excluir TUDO 
+    # Exclude everything
     - '!**'
     - '!node_modules/**'
     - '!.nuxt/**'
     - '!.git/**'
     
-    # Incluir APENAS o essencial
+    # Include only essentials
     - '.output/server/index.mjs'
     - '.output/server/package.json'
     - '.output/server/node_modules/**'
     
-    # Excluir lixo dentro de node_modules do build
+    # Exclude unnecessary files inside build node_modules
     - '!.output/server/node_modules/**/*.md'
     - '!.output/server/node_modules/**/*.ts'
     - '!.output/server/node_modules/**/*.map'
@@ -67,7 +63,7 @@ functions:
   api:
     handler: .output/server/index.handler
     events:
-      # Bloquear rotas de frontend - só permite /api/*
+      # Block frontend routes - allow only /api/*
       - httpApi:
           path: /api/{proxy+}
           method: ANY
@@ -78,7 +74,7 @@ functions:
           path: /api/ingest
           method: POST
 
-    # Alternativa com Function URL (para streaming) -> mas problema de forbbiden
+    # Function URL alternative (for streaming) -> can lead to forbidden issues
     # url:
     #   cors: true
     #   invokeMode: RESPONSE_STREAM
