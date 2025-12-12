@@ -4,18 +4,16 @@
 
 1. [Visão Geral e Stack Tecnológico](#1-visão-geral-e-stack-tecnológico)
 2. [Registro de Decisões e Dúvidas](#2-registro-de-decisões-e-dúvidas-architecture-decision-record)
-3. [Fluxo de Trabalho Git](#3-fluxo-de-trabalho-git-padrão-promiles)
-4. [Roteiro de Implementação](#4-roteiro-de-implementação-roadmap)
-5. [Implementação Técnica de Referência](#5-implementação-técnica-de-referência)
-6. [Otimização de Bundle: API-Only vs Full-Stack](#6-📦-otimização-de-bundle-api-only-vs-full-stack)
-7. [Estrutura do Projeto](#7-estrutura-do-projeto)
-8. [Como Começar](#8-como-começar)
+3. [Roteiro de Implementação](#3-roteiro-de-implementação-roadmap)
+4. [Implementação Técnica de Referência](#4-implementação-técnica-de-referência)
+5. [Otimização de Bundle: API-Only vs Full-Stack](#5-📦-otimização-de-bundle-api-only-vs-full-stack)
+6. [Estrutura do Projeto](#6-estrutura-do-projeto)
 
 ---
 
 ## 1. Visão Geral e Stack Tecnológico
 
-O objetivo é criar um Chatbot de Inteligência Artificial que responda perguntas baseadas em um documento PDF privado (RAG), com interface reativa e respostas via streaming.
+O objetivo é criar um Chatbot de Inteligência Artificial que responda perguntas baseadas em um documento PDF (RAG), com interface reativa e respostas via streaming.
 
 ### Frontend (Aplicação Web)
 * **Framework:** **Nuxt 3** (Vue.js + TailwindCSS)
@@ -23,28 +21,29 @@ O objetivo é criar um Chatbot de Inteligência Artificial que responda pergunta
 * **Comunicação:** `fetch` nativo com leitura de `ReadableStream`
 
 ### Backend (Serverless API)
-* **Framework:** **Nuxt Nitro** (Server Routes - `/server/api`)
+* **Framework:** **Nuxt Nitro** (Server Routes - `/server/api`) -> * **Talvez não tenha sido uma boa ideia usar Nuxt... me empolguei**
+
 * **Runtime:** Node.js rodando em **AWS Lambda**
-* **Acesso:** **Function URL** (Endpoint HTTPS direto, sem API Gateway complexo)
+* **Acesso:** **HTTP** (Endpoint HTTP direto, sem Function URL -> NÃO FUNCIONOU)
 * **Streaming:** `InvokeMode: RESPONSE_STREAM`
 * **Endpoints:**
     * `/api/ingest` - Upload e processamento de PDFs 
-    * `/api/chat` - Conversação com o chatbot (streaming de resposta)
+    * `/api/chat` - Conversação com o chatbot 
 
 ### Inteligência & Dados
-* **LLM:** OpenAI `gpt-5-nano`
+* **LLM:** OpenAI `gpt-4.1-nano` -> modelos como `gpt-5-nano`ficou bugado
 * **Orquestração:** **LangChain.js** (Core & Community)
 * **Banco de Conhecimento:** **Qdrant** (Vector Database)
     * *Função:* Armazenar o PDF (chunks) e transformado em vetores
 
 ---
 
-## 2. 🧠 Registro de Decisões e Dúvidas (Architecture Decision Record)
+## 2. 🧠 Registro de Decisões e Dúvidas - Estudo
 
 Esta seção detalha as dúvidas levantadas durante o planejamento e a solução final adotada.
 
 ### 2.1. Memória do Chat: Redis vs. LocalStorage vs. In-Memory
-* **Dúvida Levantada:** *"Devo usar Redis para o histórico? Posso usar variável global em Python/Node? O Qdrant salva o histórico? Banco não relacional / relacional funciona aqui?"*
+* **Dúvida Levantada:** *"Devo usar Redis para o histórico? Posso usar variável global em Python/Node? O Qdrant salva o histórico? Banco não relacional / relacional para armazenar conversas longo-prazo e redis para cachear rapidamente durante a sessão?"*
 * **Análise:**
     * *Qdrant:* Não serve para histórico de conversa, serve apenas para conhecimento (PDF)
     * *In-Memory (variável global):* Impossível em AWS Lambda, pois a função "morre" após o uso (Stateless). Variável global Node seria perdida entre invocações
@@ -56,23 +55,16 @@ Esta seção detalha as dúvidas levantadas durante o planejamento e a solução
     * A cada nova pergunta, o Frontend envia o **histórico completo** no `body` da requisição
     * O Backend recebe tudo que precisa no request, processa e responde (stateless)
     * O Backend **não armazena** e **não busca** histórico em nenhum banco de dados
-    * *Identificação (`x-user-id`):* O Front gera um UUID apenas para correlacionar logs/analytics. O backend **não usa esse ID para buscar dados** (não há dados armazenados para buscar!), apenas para logging/tracking. É como um "número de protocolo" - serve para rastrear requisições nos logs, não para recuperar histórico. Cada request é independente e autocontido.
-
-**Por que Frontend-Driven?**
-- ✅ **Simples:** Sem infraestrutura extra (Redis, DynamoDB, etc)
-- ✅ **Escalável:** Lambda é stateless, múltiplos usuários não se interferem
-- ✅ **Privado:** Usuário controla seus dados (localStorage local)
-- ✅ **Econômico:** Zero custo de persistência para MVP
-- ❌ Não persiste após limpar dados do navegador (mas é MVP)
-
+    * *Identificação (`x-user-id`):* O Front gera um UUID apenas para correlacionar logs/analytics. O backend **não usa esse ID para buscar dados** (não há dados armazenados para buscar!), apenas para logging/tracking. É como um "número de protocolo" - serve para rastrear requisições nos logs, não para recuperar histórico.
 ### 2.2. Comunicação: WebSockets vs. HTTP Streaming
 * **Dúvida Levantada:** *"Como fazer a conexão cliente servidor para esse projeto sabendo do lambda (sobe e morre)? Preciso de WebSockets? Http padrão resolve? Lambda suporta Streaming de respostas?"*
 * **Análise:**
-    * *WebSockets:* Em arquitetura Serverless, exigem API Gateway V2 e gerenciamento manual de conexões (`@connections`) no DynamoDB. Muito complexo para uma via de mão única (Bot respondendo)
+    * *WebSockets:* Em arquitetura Serverless, exigem API Gateway V2 e gerenciamento manual de conexões (`@connections`) no DynamoDB. Muito complexo para uma via de mão única (Bot respondendo) **?????????? IA viajou aqui**
     * *API Gateway Padrão:* Faz buffer da resposta (espera tudo ficar pronto para enviar), matando o efeito de digitação
 * **Decisão Final:** **Lambda Function URL com Response Streaming**
     * Usaremos o modo `RESPONSE_STREAM` nativo da Lambda
     * Isso permite enviar chunks de texto via HTTP padrão assim que o LangChain os gera
+    * Não funfou
 
 ### 2.3. Framework Backend: Nuxt Nitro vs. Express.js
 * **Dúvida Levantada:** *"Por que usar Nitro? Existem outras alternativas como Express?"*
@@ -91,57 +83,172 @@ Esta seção detalha as dúvidas levantadas durante o planejamento e a solução
     * A IA recebe apenas o necessário para responder
 
 ### 2.5. Orquestração: LangChain vs. "Na Mão"
-* **Dúvida Levantada:** *"Vamos usar LangChain ou chamar a OpenAI direto? LangChain não é complexo para streaming?"*
+* **Dúvida Levantada:** *"Vamos usar LangChain ou chamar a OpenAI direto? LangChain suporta streaming?"*
 * **Análise:**
     * O LangChain antigo era complexo. O novo (LCEL - LangChain Expression Language) simplificou o streaming com o método `.stream()`
     * Fazer a ingestão do PDF (Splitters + Embeddings) "na mão" é muito trabalhoso
 * **Decisão Final:** **Híbrido/LangChain**
-    * Usaremos LangChain para processar o PDF
+    * Usaremos LangChain para processar o PDF -> **Mas primeirs processamos o buffer via PDF loader pois se nao eu precisaria salvar em /tmp **
     * Usaremos LangChain para o Chat, aproveitando a integração nativa de streaming
 
-### 2.6. Como o Qdrant Entende Semântica e Busca Vetores
+### 2.6. Como o Qdrant Funciona e sua Relação com OpenAI Embeddings
 
-* **Dúvida Levantada:** *"Como o Qdrant entende a semântica? Como ele decide quais vetores enviar?"*
+* **Dúvida Levantada:** *"Como o Qdrant entende a semântica? Como ele decide quais vetores enviar? Qual a relação com OpenAI Embeddings?"*
 
-* **Resposta:** O Qdrant **não interpreta texto diretamente**. Ele compara **vetores (embeddings)** que representam o significado semântico do texto.
+* **Resposta:** O Qdrant **não interpreta texto diretamente**. Ele é um **banco de dados vetorial** que armazena e compara **vetores (embeddings)** gerados pelo modelo de embeddings da OpenAI. O Qdrant apenas compara números, mas esses números representam o significado semântico do texto graças ao modelo de embeddings da OpenAI.
+
+#### 🤖 O Modelo de Embeddings da OpenAI
+
+**O que são Embeddings?**
+
+Embeddings são representações numéricas (vetores) de texto que capturam o **significado semântico** das palavras e frases. Textos com significados similares geram vetores próximos no espaço vetorial.
+
+**Modelo Usado no Projeto:**
+
+**Características do Modelo:**
+
+- **Dimensões:** 1536 números por vetor
+- **Tipo:** Denso (cada dimensão tem significado)
+- **Treinamento:** Modelo pré-treinado pela OpenAI em milhões de textos
+- **Capacidade:** Entende contexto, sinônimos, relações semânticas
+- **API:** `POST https://api.openai.com/v1/embeddings`
+
+**Como o Modelo Funciona:**
+
+1. **Entrada:** Texto em linguagem natural
+   
+
+2. **Processamento Interno:**
+   - Tokenização (divide em tokens)
+   - Análise semântica (entende significado)
+   - Geração de representação vetorial
+
+3. **Saída:** Vetor de 1536 dimensões
+   
+
+**Por Que 1536 Dimensões?**
+
+- Cada dimensão captura um aspecto diferente do significado
+- Mais dimensões = mais precisão na representação
+- 1536 é o padrão do modelo `text-embedding-ada-002`
+- Balanceia precisão vs. custo computacional
+
+**Exemplo de Similaridade Semântica:**
+
+**Custo e Performance:**
+
+- **Custo:** ~$0.0001 por 1K tokens (muito barato)
+- **Latência:** ~100-300ms por requisição
+- **Rate Limit:** Depende do seu plano OpenAI
+- **Cache:** Não há cache nativo, mas você pode implementar
+
+#### 🗄️ O Que é o Qdrant?
+
+**Qdrant é um Banco de Dados Vetorial (Vector Database)**
+
+Diferente de bancos relacionais (PostgreSQL) ou NoSQL (MongoDB), o Qdrant é especializado em:
+- **Armazenar vetores** (arrays de números)
+- **Buscar por similaridade** (não por valor exato)
+- **Escalar para milhões de vetores** com performance
+
+**Arquitetura do Qdrant:**
+
+```
+┌─────────────────────────────────────┐
+│         Qdrant Cloud/Server         │
+│                                     │
+│  ┌───────────────────────────────┐  │
+│  │      Collection               │  │
+│  │  (rag-chatbot-documents)      │  │
+│  │                               │  │
+│  │  ┌─────────────────────────┐  │  │
+│  │  │  Point 1 (UUID)         │  │  │
+│  │  │  Vector: [0.23, ...]    │  │  │
+│  │  │  Payload: {text: "..."} │  │  │
+│  │  └─────────────────────────┘  │  │
+│  │                               │  │
+│  │  ┌─────────────────────────┐  │  │
+│  │  │  Point 2 (UUID)         │  │  │
+│  │  │  Vector: [0.45, ...]    │  │  │
+│  │  │  Payload: {text: "..."} │  │  │
+│  │  └─────────────────────────┘  │  │
+│  └───────────────────────────────┘  │
+└─────────────────────────────────────┘
+```
+
+**Estrutura de um Point no Qdrant:**
+
+```
+Point {
+  id: UUID                    // Identificador único
+  vector: [0.23, -0.45, ...]  // Array de 1536 números
+  payload: {                  // Metadados (texto original)
+    text: "Chunk do PDF...",
+    page: 1,
+    source: "documento.pdf"
+  }
+}
+```
+
+**Como o Qdrant Busca:**
+
+1. **Recebe um vetor de busca** (query vector)
+2. **Calcula similaridade** com todos os vetores salvos
+3. **Ordena por score** (mais similar primeiro)
+4. **Retorna top N** resultados
+
+**Algoritmos de Busca:**
+
+- **HNSW (Hierarchical Navigable Small World):** Algoritmo padrão, muito rápido
+- **Exact Search:** Busca exata (mais lenta, mais precisa)
+- **Approximate Nearest Neighbor (ANN):** Balanceia velocidade e precisão
+
+#### 🔗 Relação: OpenAI Embeddings ↔ Qdrant
+
+**Fluxo Completo da Integração:**
+
+```
+Texto → OpenAI Embeddings → Vetor [1536 números]
+                                    ↓
+                              Qdrant (armazena)
+                                    ↓
+Pergunta → OpenAI Embeddings → Vetor de busca
+                                    ↓
+                              Qdrant (busca similar)
+                                    ↓
+                              Retorna textos relevantes
+```
+
+**Por Que Precisamos dos Dois?**
+
+| Componente | Função | Por Que Precisa |
+|------------|--------|-----------------|
+| **OpenAI Embeddings** | Converte texto → vetor | Entende significado semântico |
+| **Qdrant** | Armazena e busca vetores | Escala para milhões, busca rápida |
+| **OpenAI GPT** | Gera resposta final | Entende contexto e gera texto natural |
+
+**Sem Qdrant (não funciona):**
+- ❌ Teríamos que comparar vetores manualmente
+- ❌ Não escalaria para muitos documentos
+- ❌ Busca seria muito lenta
+
+**Sem OpenAI Embeddings (não funciona):**
+- ❌ Qdrant não entende texto diretamente
+- ❌ Precisaria de outro modelo de embeddings
+- ❌ Perderia qualidade semântica
 
 #### 🔄 Fluxo Completo de Busca Semântica
 
 **Fase 1: Ingestão (Salvar no Qdrant)**
 
 ```
-1. Texto original do chunk:
-   "Thiago Silva - Engenheiro de Software. Experiência em FastAPI..."
-
-2. OpenAI Embeddings transforma texto → vetor:
-   await embeddings.embedDocuments([chunk])
-   → [0.23, -0.45, 0.67, 0.12, ... 1536 números]
-
-3. Salva no Qdrant:
-   {
-     id: uuid(),
-     vector: [0.23, -0.45, 0.67, ...],  // ← Vetor (semântica)
-     payload: {
-       text: "Thiago Silva - Engenheiro..."  // ← Texto original
-     }
-   }
+PDF → LangChain Splitter → Chunks → OpenAI Embeddings → Vetores → Qdrant
 ```
 
 **Fase 2: Busca (Quando você pergunta)**
 
 ```
-1. Sua pergunta:
-   "sobre oq ele é?"
-
-2. Pergunta vira vetor (MESMO processo):
-   await embeddings.embedQuery(question)
-   → [0.34, 0.12, -0.78, 0.89, ... 1536 números]
-
-3. Qdrant compara vetores:
-   await qdrant.search({
-     vector: queryVector,  // ← Vetor da pergunta
-     limit: 4              // ← Top 4 mais similares
-   })
+Pergunta → OpenAI Embeddings → Vetor de Busca → Qdrant → Top N Chunks → LLM → Resposta
 ```
 
 #### 📊 Como o Qdrant Compara Vetores
@@ -153,26 +260,17 @@ O Qdrant calcula a **similaridade** entre vetores usando **distância cosseno** 
 Imagine vetores de 3 dimensões (na prática são 1536):
 
 ```
-Chunk 1: "Engenheiro de Software"
+Pergunta: "Como funciona o RAG?"
 Vetor: [0.8, 0.6, 0.2]
 
-Chunk 2: "Experiência em FastAPI"
-Vetor: [0.3, 0.9, 0.1]
+Chunk 1: "RAG usa embeddings..."
+Vetor: [0.75, 0.65, 0.25]  ← Similaridade: 0.95
 
-Chunk 3: "Formação PUC-Campinas"
-Vetor: [0.1, 0.2, 0.9]
-
-Pergunta: "qual a profissão dele?"
-Vetor: [0.7, 0.5, 0.3]
+Chunk 2: "Futebol é um esporte..."
+Vetor: [0.1, 0.2, 0.9]     ← Similaridade: 0.15
 ```
 
 O Qdrant calcula a similaridade (distância cosseno):
-
-```
-Similaridade(Pergunta, Chunk 1) = 0.95  ⭐ (muito similar)
-Similaridade(Pergunta, Chunk 2) = 0.65  (pouco similar)
-Similaridade(Pergunta, Chunk 3) = 0.25  (não similar)
-```
 
 **Resultado:** Retorna Chunk 1 (mais similar).
 
@@ -182,64 +280,15 @@ Os **embeddings da OpenAI** capturam **significado**, não apenas palavras.
 
 **Exemplo:**
 
-```
-Texto 1: "Ele é programador"
-Texto 2: "Ele trabalha como desenvolvedor"
-Texto 3: "Ele gosta de futebol"
-```
-
 Mesmo com palavras diferentes, os vetores de "programador" e "desenvolvedor" ficam **próximos** no espaço vetorial, enquanto "futebol" fica **distante**.
 
 #### 🔢 Métrica de Distância (Cosine Similarity)
 
 No seu código, a collection foi criada com:
 
-```typescript
-distance: 'Cosine'  // Distância cosseno
-```
-
 **Como funciona:**
 
-```
-Similaridade = cos(θ) = (A · B) / (||A|| × ||B||)
-
-Onde:
-- A = vetor da pergunta
-- B = vetor do chunk
-- θ = ângulo entre os vetores
-- Resultado: 0.0 a 1.0 (1.0 = idêntico, 0.0 = completamente diferente)
-```
-
 #### 📝 Exemplo Prático Completo
-
-```
-Pergunta: "quais tecnologias ele usa?"
-
-1. Pergunta → Vetor: [0.89, -0.23, 0.45, ...]
-
-2. Qdrant compara com todos os chunks:
-   Chunk A: "FastAPI, React, Next.js" 
-     → [0.87, -0.25, 0.43, ...] 
-     → Score: 0.92 ⭐
-   
-   Chunk B: "Formação PUC-Campinas" 
-     → [0.12, 0.78, -0.34, ...] 
-     → Score: 0.31
-   
-   Chunk C: "Experiência em IoT" 
-     → [0.65, -0.12, 0.78, ...] 
-     → Score: 0.68 ⭐
-   
-   Chunk D: "Data de nascimento: 1995" 
-     → [0.01, 0.02, 0.03, ...] 
-     → Score: 0.05
-
-3. Retorna top 4 (ou menos se houver menos chunks):
-   - Chunk A (Score: 0.92) ✅
-   - Chunk C (Score: 0.68) ✅
-   - Chunk B (Score: 0.31)
-   - Chunk D (Score: 0.05) - só se tiver menos de 4 chunks melhores
-```
 
 #### ✅ Resumo: Como Funciona
 
@@ -251,20 +300,146 @@ Pergunta: "quais tecnologias ele usa?"
 #### 🆚 Por Que Não Busca por Palavras-Chave?
 
 **Busca por palavras-chave:**
-```
-Pergunta: "qual a profissão?"
-Busca: encontra apenas chunks com a palavra "profissão"
-Problema: perde "trabalho", "cargo", "atuação"
-```
 
 **Busca semântica (vetorial):**
-```
-Pergunta: "qual a profissão?"
-Busca: encontra chunks com significado similar
-Resultado: encontra "Engenheiro", "Desenvolvedor", "Programador"
-```
 
 **Vantagem:** Funciona mesmo com palavras diferentes que têm o mesmo significado!
+
+#### 💻 Implementação no Código: Como Tudo se Conecta
+
+**1. Ingestão (Salvar Documentos no Qdrant)**
+
+```
+PDF Upload → Processar → Dividir em Chunks → Gerar Embeddings → Salvar no Qdrant
+```
+
+**2. Busca (Quando o Usuário Pergunta)**
+
+```
+Pergunta → Embedding → Buscar no Qdrant → Top 3 Chunks → Preparar Contexto
+```
+
+**3. Geração da Resposta (LLM com Contexto)**
+
+```
+Contexto + Pergunta → OpenAI GPT → Resposta Stream → Frontend
+```
+
+#### 📊 Comparação: Busca Tradicional vs. Busca Vetorial
+
+**Busca Tradicional (SQL/Like):**
+
+**Problemas:**
+- ❌ Não encontra "desenvolvedor" se buscar "engenheiro"
+- ❌ Não entende sinônimos
+- ❌ Sensível a variações de escrita
+- ❌ Não captura contexto
+
+**Busca Vetorial (Qdrant + OpenAI Embeddings):**
+
+**Vantagens:**
+- ✅ Encontra "engenheiro", "desenvolvedor", "programador"
+- ✅ Entende sinônimos automaticamente
+- ✅ Não depende de palavras exatas
+- ✅ Captura contexto e significado
+
+**Exemplo Prático:**
+
+#### 🔍 Detalhes Técnicos: Como o Qdrant Compara Vetores
+
+**Algoritmo de Similaridade Cosseno:**
+
+**Exemplo Numérico:**
+
+**Índices no Qdrant:**
+
+O Qdrant usa **HNSW (Hierarchical Navigable Small World)** para acelerar buscas:
+
+- **Sem índice:** Compararia com todos os vetores (O(n))
+- **Com HNSW:** Busca em tempo logarítmico (O(log n))
+- **Resultado:** Busca em milissegundos mesmo com milhões de vetores
+
+#### 🎯 Por Que Essa Arquitetura Funciona?
+
+**1. Separação de Responsabilidades:**
+
+- **OpenAI Embeddings:** Entende significado (IA)
+- **Qdrant:** Armazena e busca eficientemente (Banco de dados)
+- **OpenAI GPT:** Gera resposta natural (IA)
+
+**2. Escalabilidade:**
+
+- Qdrant escala para milhões de documentos
+- Embeddings são baratos (~$0.0001 por 1K tokens)
+- Busca é rápida mesmo com muitos documentos
+
+**3. Precisão:**
+
+- Busca semântica encontra documentos relevantes mesmo sem palavras exatas
+- Contexto completo é passado para o LLM
+- Respostas são mais precisas e contextualizadas
+
+**4. Flexibilidade:**
+
+- Pode adicionar novos documentos sem retreinar modelo
+- Busca funciona em múltiplos idiomas (se o modelo suportar)
+- Fácil de atualizar ou melhorar cada componente independentemente
+
+#### 📐 Diagrama Visual: Arquitetura Completa RAG
+
+```
+┌─────────────┐
+│   Usuário   │
+└──────┬──────┘
+       │ Pergunta
+       ↓
+┌─────────────────────────────────┐
+│      Frontend (Nuxt 3)          │
+│  ┌───────────────────────────┐  │
+│  │  LocalStorage (Histórico)  │  │
+│  └───────────────────────────┘  │
+└──────┬──────────────────────────┘
+       │ POST /api/chat
+       ↓
+┌─────────────────────────────────┐
+│   Backend (Lambda + Nitro)      │
+│                                 │
+│  1. Recebe pergunta + histórico │
+│  2. Gera embedding da pergunta  │
+│  3. Busca no Qdrant             │
+│  4. Envia contexto para LLM     │
+│  5. Stream da resposta          │
+└──────┬──────────────────────────┘
+       │
+       ├──→ OpenAI Embeddings API
+       │
+       ├──→ Qdrant (Vector DB)
+       │
+       └──→ OpenAI GPT API
+```
+
+#### 🔑 Pontos-Chave da Integração
+
+**1. Mesmo Modelo de Embeddings:**
+
+**Por que isso é importante?**
+- Garante que textos similares geram vetores similares
+- Permite comparação consistente entre pergunta e documentos
+- Se mudar o modelo, precisa reindexar tudo no Qdrant
+
+**2. Qdrant Armazena Tanto Vetor Quanto Texto:**
+
+**Por que armazenar o texto?**
+- O LLM precisa do texto original, não do vetor
+- Vetor é apenas para busca, texto é para contexto
+- Evita ter que buscar texto em outro lugar
+
+**3. Busca Retorna Score de Similaridade:**
+
+**Como usar o score?**
+- Filtrar resultados muito baixos (ex: score < 0.5)
+- Priorizar resultados com score alto
+- Ajustar `limit` baseado na qualidade dos scores
 
 ---
 
@@ -295,37 +470,26 @@ Este projeto usa **Nuxt Full-Stack** (Frontend + Backend no mesmo Lambda). Mas p
 #### 📦 Nuxt Full-Stack (Atual)
 
 **Estrutura:**
+
 ```
-Seu Projeto
-├── pages/          ← Frontend (Vue components renderizados)
-├── server/         ← Backend (Node.js/H3 endpoints)
-└── nuxt.config.ts  ← Configuração única
+projeto/
+├── pages/          (Frontend Vue)
+├── server/api/     (Backend Nitro)
+└── composables/    (Compartilhado)
 ```
 
 **Build & Deploy:**
+
 ```
-pnpm run build
-         ↓
-    .output/
-    ├── public/      ← Assets estáticos (JS, CSS)
-    ├── server/      ← Node.js compilado
-    └── index.mjs    ← Entry point único
-         ↓
-    Upload para AWS Lambda (único pacote)
+pnpm build → .output/server/index.mjs → serverless deploy → Lambda
 ```
 
 **Em Execução (Lambda):**
+
 ```
-Usuario acessa: https://api.lambda.amazonaws.com/
-                         ↓
-                    Lambda Function
-                    (index.mjs inicia)
-                         ↓
-          ┌──────────────┴──────────────┐
-          ↓                             ↓
-    GET /            GET /api/chat
-  (Renderiza HTML)  (LangChain + RAG)
-   (Frontend Vue)    (Backend Node.js)
+Lambda Function
+├── Renderiza HTML (SSR)
+└── Processa /api/* (API Routes)
 ```
 
 **Vantagens para MVP:**
@@ -346,54 +510,28 @@ Usuario acessa: https://api.lambda.amazonaws.com/
 #### 🏗️ Node.js + Vue Separados (Produção)
 
 **Arquitetura Desacoplada:**
+
 ```
-┌─────────────────┐         ┌──────────────┐
-│   S3 + CDN      │         │   Lambda     │
-│  (Vue Build)    │         │  (Node API)  │
-└────────┬────────┘         └──────┬───────┘
-         │                         │
-    estáticos.com          api.estáticos.com
-      (S3+CF)               (API puro)
+Frontend (S3 + CloudFront)
+    ↓ HTTP
+Backend (Lambda)
+    ↓ API Calls
+OpenAI + Qdrant
 ```
 
 **Build Diferenciado:**
-```bash
-# Frontend: Build estático
-pnpm run build:frontend
-    ↓
-dist/
-├── index.html
-├── js/
-├── css/
-└── assets/
-    ↓
-Upload para S3 → CloudFront (CDN)
 
-# Backend: API isolada
-pnpm run build:api
-    ↓
-.output-api/
-├── server/
-└── index.mjs
-    ↓
-Upload para Lambda
+```
+Frontend: npm build → dist/ → S3
+Backend:  serverless deploy → Lambda
 ```
 
 **Em Execução:**
+
 ```
-Usuario acessa: https://estáticos.com
-                      ↓
-    CloudFront serve HTML/JS/CSS
-    (Assets estáticos pré-compilados)
-                      ↓
-   Script Vue executa no navegador
-                      ↓
-   POST /api/chat → https://api.estáticos.com
-                      ↓
-              Lambda Function
-          (Node.js + LangChain puro)
-                      ↓
-         Retorna resposta com streaming
+Usuário → CloudFront → S3 (HTML/JS)
+         ↓
+         Lambda (API)
 ```
 
 **Vantagens para Produção:**
@@ -426,25 +564,6 @@ Usuario acessa: https://estáticos.com
 
 ---
 
-#### 🎬 Roadmap Sugerido
-
-1. **Fase 1 (MVP - Atual)**: Nuxt Full-Stack
-   - Válido para <100 reqs/dia
-   - Prototipa rápido
-   - Deploy simples
-
-2. **Fase 2 (Beta - ~1 mês)**: Separação de builds
-   - Mantém monorepo único
-   - Scripts `build:frontend` e `build:api`
-   - Deployments independentes mas no mesmo repo
-
-3. **Fase 3 (Produção)**: Monorepo split
-   - 2 repositórios (`frontend` e `backend-api`)
-   - CI/CD pipelines completamente separadas
-   - Scaling independente
-
----
-
 #### 💡 Resposta Técnica: Como Funciona?
 
 **Por que ambos vão juntos para Lambda atualmente?**
@@ -464,262 +583,10 @@ Quando você executa `pnpm run build` no Nuxt:
 
 **Vantagem futura**: Você pode exportar apenas o `/server` compilado para uma Lambda separada sem alterar código (apenas CI/CD).
 
-
-## 3. Fluxo de Trabalho Git (Padrão Standard)
-
-Seguiremos rigorosamente este fluxo para organização.
-
-### Regras de Branch
-1. **Nunca** commitar na `main` ou `develop` diretamente
-2. Toda branch nasce da `develop`
-3. Toda branch morre (merge) na `develop`
-
-### Nomenclatura
-Padrão: `DDMMYY-Feature-Description`
-
-#### Formato
-- **DDMMYY**: Data no formato dia/mês/ano (2 dígitos cada)
-- **Feature**: Nome da feature em kebab-case
-- **Description**: Descrição adicional em kebab-case
-
-#### Exemplos
-041125-DB-schemas-review-refactor
-031225-Notifications-V2-implementation
-031225-Alerts-refactor-remove-airlines
-031225-Redis-optimization-monthly-quotas
-031225-Moblix-V2-integration
-#### Regras
-- Use kebab-case (palavras separadas por hífens)
-- Seja descritivo mas conciso
-- Inclua a data de criação da branch
-- Use maiúsculas apenas para siglas (V2, API, DB)
-
-### Fluxo Simplificado
-
-#### Estrutura
-```
-Feature Branch → develop → master
-```
-
-#### Fluxo Detalhado
-
-1. **Criar branch de feature**
-   ```bash
-   git checkout develop
-   git pull origin develop
-   git checkout -b 081225-project-setup
-   ```
-
-2. **Desenvolver feature**
-   - Múltiplos commits organizados
-   - Commits seguindo Conventional Commits
-   - Data já está no nome da branch (não repetir nos commits)
-
-3. **Criar Pull Request**
-   - PR: `081225-project-setup` → `develop`
-   - Adicionar descrição clara
-   - Linkar issues relacionadas
-
-4. **Merge em develop**
-   - Após code review e aprovação
-   - Testes passando
-   - Sem conflitos
-   - Merges frequente na branch develop
-
-5. **Merge em master**
-   - Apenas quando função de alto nível estiver completa
-   - Testes passando
-   - Documentação atualizada
-   - Coordenação com frontend alinhada
-
-### Regra: Sempre Partir de Develop
-
-**Todas as branches de feature devem SEMPRE ser criadas a partir de `develop`.**
-
-#### Por quê?
-
-1. **`develop` é a branch de integração estável**
-   - Contém todas as features já mergeadas e testadas
-   - É o ponto de referência comum para todo o time
-
-2. **Evita dependências entre features**
-   - Cada feature é independente
-   - Não cria dependências desnecessárias entre branches
-
-3. **Facilita o merge posterior**
-   - Menos conflitos ao fazer merge em `develop`
-   - Histórico mais limpo e organizado
-
-4. **Mantém todas as features no mesmo ponto de partida**
-   - Garante consistência entre diferentes features
-   - Facilita code review e testes
-
-#### Workflow Correto
-
-```bash
-# 1. SEMPRE voltar para develop primeiro
-git checkout develop
-
-# 2. Atualizar develop com o remoto (importante!)
-git pull origin develop
-
-# 3. Criar nova branch de feature a partir de develop atualizada
-git checkout -b 081225-project-setup
-
-# 4. Agora trabalhar na feature
-git add <arquivos>
-git commit -m "feat(setup): ..."
-```
-
-#### O Que NÃO Fazer
-
-```bash
-# ❌ ERRADO - Criar branch a partir de outra feature branch
-git checkout 091225-backend-logic
-git checkout -b 101225-frontend-ui  # ERRADO!
-
-# ❌ ERRADO - Criar branch sem atualizar develop primeiro
-git checkout develop
-git checkout -b 081225-project-setup  # Pode estar desatualizada!
-```
-
-### Princípios
-- **Features**: Merge direto em `develop` via PR
-- **Master**: Merge apenas quando função completa e testada
-- **Develop**: Sempre estável para basear trabalho
-
-### Conventional Commits
-
-#### Formato
-```
-<tipo>(<escopo>): <descrição>
-```
-
-#### Tipos Comuns
-- `feat`: Nova funcionalidade
-- `fix`: Correção de bug
-- `docs`: Documentação
-- `style`: Formatação (sem mudança de código)
-- `refactor`: Refatoração
-- `perf`: Melhoria de performance
-- `test`: Testes
-- `chore`: Tarefas de manutenção
-- `ci`: CI/CD
-- `build`: Build system
-
-#### Exemplos
-```bash
-feat(auth): adiciona login com Google OAuth
-fix(payment): corrige cálculo de desconto
-docs(readme): atualiza instruções de instalação
-refactor(api): simplifica validação de dados
-```
-
-#### Primeira Linha
-- Use o imperativo: "adiciona", "corrige", "atualiza"
-- Não use: "adicionado", "corrigido", "atualizado"
-- Seja específico e claro
-- Evite mensagens genéricas como "update" ou "fix"
-
-#### Boas Práticas
-- Um commit = uma mudança lógica
-- Commits pequenos e frequentes
-- Teste antes de commitar
-- Use o corpo para explicar o "porquê" quando necessário
-
-#### Estrutura Completa
-
-```
-<tipo>(<escopo>): <assunto curto>
-
-<corpo opcional explicando o porquê>
-
-<rodapé opcional com referências>
-```
-
-#### Exemplo Completo
-```bash
-feat(api): adiciona endpoint de busca de usuários
-
-Implementa busca paginada com filtros por nome e email.
-Isso melhora a performance em listas grandes de usuários.
-
-Closes #123
-```
-
-#### Exemplos de Boas Mensagens
-```bash
-feat(chat): adiciona componente ChatMessage
-feat(api): implementa endpoint de streaming
-feat(rag): integra Qdrant para busca vetorial
-refactor(ui): simplifica lógica de LocalStorage
-fix(stream): corrige encoding de caracteres especiais
-docs(readme): atualiza instruções de instalação
-```
-
-#### Exemplos de Mensagens a Evitar
-```bash
-# ❌ Evite
-update
-fix
-changes
-WIP
-test
-
-# ✅ Prefira
-feat(chat): adiciona componente ChatMessage
-fix(stream): corrige encoding de caracteres especiais
-refactor(ui): simplifica lógica de LocalStorage
-```
-
 ---
 
-## 4. Roteiro de Implementação (Roadmap)
 
-Siga esta ordem exata para evitar bloqueios.
-
-### Fase 0: Setup Inicial
-* **Branch:** `project-setup`
-* **Tarefas:**
-    * Init Nuxt 3
-    * Install LangChain/OpenAI libs
-    * Configurar `.env`
-
-### Fase 1: O "Cérebro" (Ingestão de Dados)
-* **Branch:** `rag-ingestion-implementation`
-* **Tarefas:**
-    * Criar endpoint `server/api/ingest.post.ts`
-    * Receber PDF via multipart/form-data
-    * Processar com LangChain (`PDFLoader` + `RecursiveCharacterTextSplitter`)
-    * Gerar Embeddings e salvar no Qdrant
-    * Criar componente `DocumentUpload.vue` (drag & drop)
-* *Nota:* O upload agora é feito via interface web, não por script local
-
-### Fase 2: O Backend Lógico
-* **Branch:** `backend-logic-implementation`
-* **Tarefas:**
-    * Criar rota Nitro `server/api/chat.post.ts`
-    * Receber `{ question, history }`
-    * Configurar conexão Qdrant + OpenAI via LangChain
-    * Testar resposta texto simples (sem stream)
-
-### Fase 3: O Frontend Visual
-* **Branch:** `frontend-ui-implementation`
-* **Tarefas:**
-    * Layout do Chat
-    * Lógica de `LocalStorage` (Salvar histórico)
-    * Envio do Payload completo para a API
-
-### Fase 4: O Streaming (Integração Final)
-* **Branch:** `streaming-implementation`
-* **Tarefas:**
-    * **Back:** Mudar resposta para `sendStream` com iterável do LangChain
-    * **Front:** Mudar `fetch` para usar `getReader()` e montar texto em tempo real
-    * **Infra:** Configurar `serverless.yml` com `invokeMode: RESPONSE_STREAM`
-
----
-
-## 5. Implementação Técnica de Referência
+## 4. Implementação Técnica de Referência
 
 ### 5.1 Endpoints da API
 
@@ -730,12 +597,6 @@ O projeto possui **2 endpoints principais**:
 Endpoint para fazer upload de PDFs e processar para o Qdrant.
 
 **Request:**
-```http
-POST /api/ingest
-Content-Type: multipart/form-data
-
-file: <PDF_FILE>
-```
 
 **Response:**
 Retorna JSON com status de sucesso, número de chunks processados e ID do documento.
@@ -748,26 +609,8 @@ Ver código em `server/api/ingest.post.ts` para implementação completa com PDF
 Endpoint para conversar com o chatbot. Retorna resposta via streaming.
 
 **Request:**
-```http
-POST /api/chat
-Content-Type: application/json
-x-user-id: <UUID>
-
-{
-  "question": "Qual é o conteúdo do documento?",
-  "history": [
-    { "role": "user", "content": "Pergunta anterior" },
-    { "role": "assistant", "content": "Resposta anterior" }
-  ]
-}
-```
 
 **Response:**
-```http
-Content-Type: text/event-stream
-
-[Streaming de texto em tempo real]
-```
 
 **Implementação:** Ver seção 5.2
 
@@ -784,13 +627,18 @@ Configuração vital para o streaming funcionar na AWS.
 ### 5.3 Lógica de Streaming no Nitro (`server/api/chat.post.ts`)
 
 **Fluxo de Streaming:**
-1. Recebe `{ question, history }` do frontend
-2. Transforma histórico JSON em objetos LangChain (HumanMessage, AIMessage)
-3. Configura ChatOpenAI com `streaming: true`
-4. Cria Chain com prompt template + LLM + output parser
-5. Configura headers HTTP (`Content-Type: text/event-stream`)
-6. Executa chain e converte para ReadableStream
-7. Retorna stream usando `sendStream(event, readable)`
+
+```
+Frontend → POST /api/chat → Lambda
+                        ↓
+            LangChain Chain (streaming)
+                        ↓
+            OpenAI GPT (stream)
+                        ↓
+            ReadableStream → Frontend
+                        ↓
+            UI atualiza em tempo real
+```
 
 **Ver implementação completa em:** `server/api/chat.post.ts`
 
@@ -799,7 +647,7 @@ Configuração vital para o streaming funcionar na AWS.
 **Resumo direto**
 - **Para que servem as chaves (Access Key / Secret):** credenciais de usuário IAM para o CLI (Serverless Framework / AWS CLI) autenticar na sua conta AWS e criar/atualizar recursos. Sem elas, o `serverless deploy` não tem permissão para subir nada.
 - **Quem usa:** o próprio `serverless deploy` (via AWS SDK) e qualquer comando AWS CLI. Não são usadas pelo código do app em runtime e não vão dentro do bundle.
-- **Onde ficam:** o comando `serverless config credentials --provider aws --key ... --secret ...` salva em `~/.aws/credentials` (e `~/.aws/config`), fora do projeto e fora do Git.
+- **Onde ficam:** o comando `serverless config credentials --provider aws --key ... --secret ...` salva em `~/.aws/credentials` (e `~/.aws/config`), fora do projeto.
 - **Relação com `serverless.yml`:**
   - O `serverless.yml` descreve o que criar na AWS: serviço `rag-chatbot-mvp`, runtime `nodejs18.x`, região `us-east-1`, função `api` apontando para `.output/server/index.handler`, URL pública com CORS e streaming, timeout/memória e variáveis de ambiente do Lambda.
   - Ao rodar `serverless deploy`, o Serverless Framework lê o `serverless.yml`, empacota o handler e usa as credenciais do `~/.aws/credentials` para provisionar/atualizar a Lambda + URL.
@@ -813,63 +661,28 @@ Configuração vital para o streaming funcionar na AWS.
 
 #### 📌 Guia passo a passo (AWS + Serverless)
 
-##### Fase 1: O Terreno (AWS Root)
+##### Fase 1:
 Objetivo: ter uma conta ativa na nuvem.
 1. Acessar `aws.amazon.com` e criar a conta (root user) com email, pagamento e verificação.
 
-##### Fase 2: O Crachá do Robô (IAM User)
+##### Fase 2: 
 Objetivo: gerar chaves para o Serverless Framework atuar na conta.
 1. No console AWS, abrir **IAM > Users > Create User** (ex: `serverless-admin`).
 2. Em **Permissions**, usar **Attach policies directly** → `AdministratorAccess` (para facilitar o MVP).
 3. Abrir o usuário criado → aba **Security Credentials** → **Access Keys** → **Create access key** → opção **Command Line Interface (CLI)**.
 4. Copiar `Access Key ID` e `Secret Access Key` (guardar em local seguro).
 
-##### Fase 3: Configurar o "crachá" no Serverless Framework
+##### Fase 3:
 Objetivo: instalar a ferramenta e armazenar as credenciais localmente.
-```bash
-pnpm add -g serverless
-serverless config credentials --provider aws --key SUA_ACCESS_KEY --secret SUA_SECRET_KEY
-```
+
 *Esse comando salva em `~/.aws/credentials` para o Serverless usar sempre. Não vai para o repo.*
 
 ##### Fase 4: Preparar o Projeto Nuxt
 Objetivo: deixar o código pronto para empacotar.
-```bash
-pnpm add -D serverless-dotenv-plugin
-
-# Criar .env na raiz (exemplo)
-OPENAI_API_KEY=sk-proj-...
-QDRANT_URL=https://...
-QDRANT_API_KEY=th-...
-
-# Conferir serverless.yml (resumo)
-service: rag-chatbot-mvp
-frameworkVersion: '3'
-provider:
-  name: aws
-  runtime: nodejs18.x
-  region: us-east-1
-  environment:
-    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
-    QDRANT_URL: ${env:QDRANT_URL}
-    QDRANT_API_KEY: ${env:QDRANT_API_KEY}
-functions:
-  api:
-    handler: .output/server/index.handler
-    url:
-      cors: true
-      invokeMode: RESPONSE_STREAM
-    timeout: 30
-plugins:
-  - serverless-dotenv-plugin
-```
 
 ##### Fase 5: Build e Deploy
 Objetivo: compilar o Nuxt e enviar para a AWS.
-```bash
-pnpm build          # gera .output
-serverless deploy   # lê o serverless.yml e faz o upload
-```
+
 Após o deploy, o terminal retorna a Function URL pública (ex: `https://xyz.lambda-url.us-east-1.on.aws`).
 
 ---
@@ -877,10 +690,6 @@ Após o deploy, o terminal retorna a Function URL pública (ex: `https://xyz.lam
 ### 📦 O que `pnpm run deploy:api` faz?
 
 O script `deploy:api` executa dois comandos em sequência:
-
-```bash
-"deploy:api": "pnpm build && serverless deploy --verbose"
-```
 
 #### 1️⃣ `pnpm build` → Executa `nuxt build`:
 - Compila o código Vue/Nuxt (TypeScript → JavaScript)
@@ -910,22 +719,16 @@ O build é **essencial** para o Lambda porque:
 4. **Reduz tamanho**: De ~500 MB (`node_modules` raiz) para ~2 MB (`.output/server/`)
 
 **Resultado final do build:**
-```
-.output/server/
-├── index.mjs       (208 KB) ← Código da aplicação + deps bundladas
-├── package.json    (673 B)  ← Metadados mínimos
-└── node_modules/   (~1.5 MB) ← Apenas deps que não podem ser bundladas
-```
 
 ---
 
-## 6. 📦 Otimização de Bundle: API-Only vs Full-Stack
+## 5. 📦 Otimização de Bundle: API-Only vs Full-Stack
 
 ### 🎯 Por que Full-Stack funcionou mas API-Only não?
 
 Durante o desenvolvimento, encontramos um problema curioso: o modo **Full-Stack funcionou de primeira**, mas o **API-Only dava erro de tamanho** (130 MB). 
 
-**A resposta:** O problema **nunca foi o build do Nuxt** - foi a **configuração do `serverless.yml`!**
+**A resposta:** O problema **nunca foi o build do Nuxt** - foi a **configuração do `serverless.yml`! nos patterns**
 
 ---
 
@@ -933,34 +736,13 @@ Durante o desenvolvimento, encontramos um problema curioso: o modo **Full-Stack 
 
 O build do Nuxt **sempre funcionou corretamente** em ambos os modos:
 
-```
-Build do Nuxt (.output/):
-├── public/     (500 KB)  ← Assets frontend (só no Full-Stack)
-└── server/     (2 MB)    ← Backend otimizado
-    └── node_modules/ (1.5 MB) ← Deps bundladas
-```
-
 O problema estava no **empacotamento do Serverless Framework**, não no build.
 
 ---
 
 #### ✅ Full-Stack (funcionou de primeira)
 
-```yaml
-# serverless.yml Full-Stack
-package:
-  patterns:
-    - '.output/**'           # Inclui .output/public + .output/server
-    - '!node_modules/**'     # Exclui node_modules raiz
-```
-
 **O que o Serverless empacotava:**
-```
-ZIP enviado (~3.5 MB):
-├── .output/public/  ✅ (500 KB)
-├── .output/server/  ✅ (2 MB)
-└── node_modules/    ❌ Excluído corretamente
-```
 
 **Por que funcionou?** O pattern `.output/**` era específico o suficiente para que o Serverless não "vazasse" outros arquivos.
 
@@ -968,20 +750,7 @@ ZIP enviado (~3.5 MB):
 
 #### ❌ API-Only (não funcionou - ANTES de arrumar)
 
-```yaml
-# serverless.yml API-Only (ANTES)
-package:
-  patterns:
-    - '.output/server/**'    # Inclui server
-    - '!node_modules/**'     # DEVERIA excluir, mas...
-```
-
 **O que o Serverless REALMENTE empacotava:**
-```
-ZIP enviado (~130 MB):
-├── .output/server/  ✅ (2 MB)
-├── node_modules/    ❌ (500 MB) ← DA RAIZ! 😱
-```
 
 **Por que falhou?** O Serverless Framework faz um **glob match** na raiz do projeto. Como `.output/server/**` não cobre "tudo", ele ainda procurava outros arquivos e **encontrava o `node_modules/` da raiz do projeto**.
 
@@ -991,24 +760,7 @@ A exclusão `!node_modules/**` não funcionava bem porque a **ordem dos patterns
 
 #### ✅ API-Only (funcionou - DEPOIS de arrumar)
 
-```yaml
-# serverless.yml API-Only (DEPOIS)
-package:
-  patterns:
-    - '!**'                          # 1️⃣ Exclui ABSOLUTAMENTE TUDO
-    - '!node_modules/**'             # 2️⃣ Garante exclusão extra
-    - '.output/server/index.mjs'     # 3️⃣ Inclui APENAS o necessário
-    - '.output/server/package.json'
-    - '.output/server/node_modules/**'
-```
-
 **O que o Serverless empacota agora:**
-```
-ZIP enviado (~517 KB):
-├── .output/server/index.mjs      ✅ (208 KB)
-├── .output/server/package.json   ✅ (673 B)
-└── .output/server/node_modules/  ✅ (1.5 MB)
-```
 
 **Por que funciona?** O `!**` exclui **absolutamente tudo** primeiro, e depois incluímos **apenas** os arquivos específicos que precisamos.
 
@@ -1054,14 +806,6 @@ Durante o desenvolvimento, testamos duas abordagens para expor a Lambda:
 
 #### ❌ Function URL (não funcionou inicialmente)
 
-```yaml
-functions:
-  api:
-    url:
-      cors: true
-      invokeMode: RESPONSE_STREAM
-```
-
 **Problema:** O Serverless Framework v3 criava a Function URL com `AuthType: AWS_IAM` por padrão, exigindo credenciais AWS assinadas para acesso. Resultado: **403 Forbidden** para requisições públicas.
 
 **Por que isso aconteceu:**
@@ -1076,13 +820,6 @@ functions:
 ---
 
 #### ✅ API Gateway HTTP API (funcionou de primeira)
-
-```yaml
-functions:
-  api:
-    events:
-      - httpApi: '*'
-```
 
 **Por que funcionou:**
 - API Gateway HTTP API é um serviço mais maduro e amplamente suportado
@@ -1131,32 +868,7 @@ functions:
 
 **Em ambos os casos**, seu código no cliente usa o **mesmo** `fetch` + `ReadableStream`:
 
-```ts
-const response = await fetch('/api/chat', { method: 'POST', body: ... })
-const reader = response.body.getReader()
-while (true) {
-  const { done, value } = await reader.read()
-  if (done) break
-  console.log(new TextDecoder().decode(value)) // chunks chegam aqui
-}
-```
-
 **A diferença está no backend:**
-
-```ts
-// Function URL (RESPONSE_STREAM)
-export const handler = awslambda.streamifyResponse(async (event, responseStream) => {
-  responseStream.write('chunk1\n')
-  responseStream.write('chunk2\n')
-  responseStream.end()
-})
-
-// API Gateway (HTTP chunked) - mais simples!
-export default defineEventHandler(async (event) => {
-  const stream = new ReadableStream(...)
-  return stream // Nuxt/Nitro cuida do resto
-})
-```
 
 **Conclusão:** Com `httpApi`, o streaming funciona perfeitamente para chat. A única limitação real é o **timeout de 30s**.
 
@@ -1169,13 +881,6 @@ Se você quer streaming de resposta no chat, tem duas opções:
 ##### ✅ Opção 1: httpApi (Atual) - **RECOMENDADO**
 
 **Status:** Já configurado e funcionando
-
-```yaml
-functions:
-  api:
-    events:
-      - httpApi: '*'
-```
 
 **Vantagens:**
 - ✅ Streaming já funciona (HTTP Transfer-Encoding: chunked)
@@ -1201,39 +906,6 @@ functions:
 
 **Status:** Requer configuração adicional
 
-```yaml
-functions:
-  api:
-    handler: .output/server/index.handler
-    url:
-      cors: true
-      invokeMode: RESPONSE_STREAM
-    timeout: 120
-    memorySize: 512
-
-# Adicionar no final do serverless.yml
-resources:
-  Resources:
-    ApiLambdaFunctionUrl:
-      Type: AWS::Lambda::Url
-      Properties:
-        AuthType: NONE  # ← Crucial para acesso público
-        TargetFunctionArn: !GetAtt ApiLambdaFunction.Arn
-        InvokeMode: RESPONSE_STREAM
-        Cors:
-          AllowOrigins: ["*"]
-          AllowMethods: ["*"]
-          AllowHeaders: ["*"]
-    
-    ApiLambdaPermissionFnUrl:
-      Type: AWS::Lambda::Permission
-      Properties:
-        FunctionName: !Ref ApiLambdaFunction
-        Action: lambda:InvokeFunctionUrl
-        Principal: "*"
-        FunctionUrlAuthType: NONE
-```
-
 **Vantagens:**
 - ✅ Streaming nativo da Lambda
 - ✅ Timeout até 15 minutos
@@ -1246,27 +918,6 @@ resources:
 - ❌ Nuxt/Nitro não suporta nativamente `RESPONSE_STREAM` sem adaptações
 
 **Mudanças necessárias no código:**
-
-```ts
-// ANTES (funciona com httpApi)
-export default defineEventHandler(async (event) => {
-  const stream = new ReadableStream({
-    async start(controller) {
-      controller.enqueue('chunk1\n')
-      controller.close()
-    }
-  })
-  return stream
-})
-
-// DEPOIS (para RESPONSE_STREAM)
-import { streamifyResponse } from '@aws-lambda-powertools/streamify'
-
-export const handler = streamifyResponse(async (event, responseStream) => {
-  responseStream.write('chunk1\n')
-  responseStream.end()
-})
-```
 
 ---
 
@@ -1315,18 +966,9 @@ Durante o desenvolvimento, enfrentamos diversos desafios ao tentar usar ambos os
 - ⚠️ `cors: true` no `serverless.yml` **não é suficiente**
 - ❌ CORS **deve ser controlado manualmente na aplicação**
 - ✅ Cada handler precisa adicionar headers CORS explicitamente:
-  ```typescript
-  setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
-  setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type, x-user-id')
-  setResponseHeader(event, 'Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  ```
+  
 - ✅ Preflight OPTIONS deve ser tratado manualmente em cada handler:
-  ```typescript
-  if (event.method === 'OPTIONS') {
-    setResponseStatus(event, 204)
-    return null
-  }
-  ```
+  
 - ⚠️ Middleware global não é suficiente - cada endpoint precisa de CORS explícito
 
 **Por que essa diferença?**
@@ -1346,31 +988,12 @@ Durante o desenvolvimento, enfrentamos diversos desafios ao tentar usar ambos os
 
 **Como funciona:**
 
-```typescript
-// Seu código (backend) - IGUAL NOS DOIS MODOS
-export default defineEventHandler(async (event) => {
-  const stream = new ReadableStream({
-    async start(controller) {
-      for await (const chunk of llmStream) {
-        controller.enqueue(encoder.encode(chunk))
-      }
-      controller.close()
-    }
-  })
-  return stream
-})
-
-// Cliente (frontend) - IGUAL NOS DOIS MODOS
-const response = await fetch('/api/chat', { method: 'POST', body: ... })
-const reader = response.body.getReader()
-while (true) {
-  const { done, value } = await reader.read()
-  if (done) break
-  console.log(new TextDecoder().decode(value)) // chunks chegam em tempo real
-}
-```
-
 **Fluxo Completo:**
+
+```
+Backend → ReadableStream → Lambda → Gateway/URL → Cliente
+         (chunks)         (processa)  (repassa)    (recebe em tempo real)
+```
 
 | Etapa | HTTP API | Function URL |
 |-------|----------|--------------|
@@ -1424,70 +1047,18 @@ Esta mensagem é um fallback quando o modelo OpenAI não emite nenhum chunk de t
 
 **Melhorias implementadas:**
 
-```typescript
-// ANTES - mensagem genérica
-if (!emitted) {
-  controller.enqueue(encoder.encode('Nenhuma resposta gerada.'))
-}
-
-// DEPOIS - mensagem contextual
-if (!emitted) {
-  const fallbackMessage = contextTexts.length === 0
-    ? 'Nenhum contexto relevante foi encontrado no banco de dados para responder sua pergunta. Por favor, verifique se o documento foi carregado corretamente.'
-    : 'Não foi possível gerar uma resposta no momento. Por favor, tente reformular sua pergunta ou tente novamente em alguns instantes.'
-  controller.enqueue(encoder.encode(fallbackMessage))
-}
-```
-
 **Logs adicionados para debugging:**
-
-```
-[CHAT] Starting chat request processing
-[CHAT] User ID: anon
-[CHAT] Question: qual meu nome?
-[CHAT] History length: 2 messages
-[CHAT] Initializing Qdrant client, collection: rag-chatbot-documents
-[CHAT] Initializing OpenAI embeddings
-[CHAT] Generating query embedding for search
-[CHAT] ✓ Query embedding generated (1536 dimensions)
-[CHAT] Searching Qdrant for relevant contexts...
-[CHAT] ✓ Retrieved 4 relevant chunks from Qdrant
-[CHAT] Context preview (first chunk): Thiago Silva - Engenheiro de Software...
-[CHAT] Preparing conversation history...
-[CHAT] ✓ Converted 2 history messages
-[CHAT] Building system prompt with context...
-[CHAT] ✓ System prompt built with 4 total messages
-[CHAT] Initializing OpenAI model (gpt-4o-mini) with streaming...
-[CHAT] Starting LLM streaming...
-[CHAT] ✅ Streaming completed successfully - 47 chunks sent
-```
 
 ##### 5. Por Que Não Precisa Recarregar o PDF a Cada Sessão
 
 **Arquitetura de Persistência:**
 
 ```
-Cliente (localStorage)     Lambda (stateless)     Qdrant (permanente)
-       |                          |                      |
-       | 1. Carrega PDF           |                      |
-       |------------------------->|                      |
-       |                          | 2. Processa chunks   |
-       |                          |--------------------->|
-       |                          |                      | 3. Salva vetores
-       |                          |<---------------------|
-       | 4. Confirma OK           |                      |
-       |<-------------------------|                      |
-       |                          |                      |
-       | ... tempo passa ...      |                      |
-       |                          |                      |
-       | 5. Faz pergunta          |                      |
-       |------------------------->|                      |
-       |                          | 6. Busca contexto    |
-       |                          |--------------------->|
-       |                          |<---------------------| 7. Retorna chunks
-       |                          | 8. Gera resposta     |
-       | 9. Resposta streaming    |                      |
-       |<-------------------------|                      |
+Upload PDF → Processar → Qdrant (persistente)
+                              ↓
+                    Busca sempre disponível
+                              ↓
+                    Não precisa recarregar
 ```
 
 **Conclusão:** O PDF fica **permanentemente no Qdrant**. Você só precisa carregar uma vez.
@@ -1505,38 +1076,11 @@ Quando você faz deploy apenas da API, ainda pode acontecer do SSR do Nuxt tenta
 
 #### ✅ Resultado Esperado
 
-```bash
-# ❌ Rota raiz bloqueada
-$ curl https://sua-api.execute-api.sa-east-1.amazonaws.com
-{"message":"Not Found"}  # 404 do API Gateway
-
-# ✅ Rotas /api/* funcionam
-$ curl https://sua-api.execute-api.sa-east-1.amazonaws.com/api/chat
-{"message":"Chat endpoint - a ser implementado"}  # JSON puro
-```
-
 ---
 
 #### 🔧 Solução 1: Bloquear no API Gateway (RECOMENDADO)
 
 Configure rotas específicas no `serverless.yml`:
-
-```yaml
-functions:
-  api:
-    handler: .output/server/index.handler
-    events:
-      # Bloquear rotas de frontend - só permite /api/*
-      - httpApi:
-          path: /api/{proxy+}
-          method: ANY
-      - httpApi:
-          path: /api/chat
-          method: POST
-      - httpApi:
-          path: /api/ingest
-          method: POST
-```
 
 **Vantagem:** O API Gateway retorna **404 antes de chegar na Lambda** → economia de custo e latência.
 
@@ -1545,18 +1089,6 @@ functions:
 #### 🔧 Solução 2: Forçar Content-Type nos Handlers
 
 Adicione `setResponseHeader` em **todos os endpoints**:
-
-```typescript
-// server/api/chat.post.ts
-export default defineEventHandler(async (event) => {
-  // Forçar resposta JSON (evita SSR renderizar HTML)
-  setResponseHeader(event, 'Content-Type', 'application/json')
-  
-  return {
-    message: 'Chat endpoint - a ser implementado'
-  }
-})
-```
 
 **Por que precisa disso?**
 
@@ -1567,22 +1099,6 @@ O Nuxt tem um **sistema de rotas universal** que tenta renderizar páginas HTML 
 #### 🔧 Solução 3: Middleware Global (Opcional)
 
 Adicione um middleware que bloqueia tudo exceto `/api/*`:
-
-```typescript
-// server/middleware/api-only.ts
-export default defineEventHandler((event) => {
-  const path = event.path || event.node.req.url || ''
-  
-  // Permitir apenas rotas /api/*
-  if (!path.startsWith('/api/')) {
-    throw createError({
-      statusCode: 404,
-      statusMessage: 'Not Found',
-      message: 'API-only mode. Frontend runs locally in Docker.'
-    })
-  }
-})
-```
 
 **Vantagem:** Bloqueia globalmente, mas a Lambda ainda processa a request.
 
@@ -1613,47 +1129,13 @@ Embora o problema tenha sido no `serverless.yml`, é útil entender que o **Nitr
 
 #### Configurações extras no `nuxt.config.ts`:
 
-```typescript
-nitro: {
-  preset: 'aws-lambda',
-  serveStatic: false,
-  minify: true,
-  sourcemap: false,  // Remove source maps
-  
-  rollupConfig: {
-    output: {
-      format: 'esm',
-      sourcemap: false
-    }
-  }
-}
-```
-
 **Resultado do Build:**
-```
-.output/server/
-├── index.mjs       (208 KB) ← Código bundlado
-├── package.json    (673 B)
-└── node_modules/   (~1.5 MB) ← Apenas deps não bundláveis
-```
 
 > **Importante:** Essas otimizações do Nitro **sempre funcionaram**. O problema de 130 MB era porque o Serverless Framework incluía o `node_modules/` da **raiz do projeto** (500 MB), não o `.output/server/node_modules/` otimizado.
 
 ---
 
 #### ⚙️ Configuração Final do serverless.yml
-
-```yaml
-package:
-  patterns:
-    - '!**'                     # 1. Exclui TUDO (primeira regra)
-    - '!node_modules/**'        # 2. Garante exclusão de node_modules raiz
-    - '!.nuxt/**'               # 3. Exclui cache do Nuxt
-    - '!.git/**'                # 4. Exclui arquivos git
-    - '.output/server/index.mjs'        # 5. Inclui só o que precisa
-    - '.output/server/package.json'
-    - '.output/server/node_modules/**'  # 6. Inclui deps do build
-```
 
 **Por que isso funciona?**
 1. `'!**'` exclui **absolutamente tudo** do projeto
@@ -1662,10 +1144,6 @@ package:
 4. Apenas o `node_modules/` otimizado dentro de `.output/server/` (2 MB) é incluído
 
 **Resultado real do projeto:**
-```
-Antes (ordem errada): 130 MB ZIP ❌ (incluía node_modules raiz)
-Depois (ordem correta): 517 KB ZIP ✅ (apenas .output/server)
-```
 
 ---
 
@@ -1702,24 +1180,6 @@ Quando você roda `pnpm install --production` ou quando o Serverless Framework f
 
 ##### 📋 Exemplo de package.json correto:
 
-```json
-{
-  "dependencies": {
-    "langchain": "^0.3.x",
-    "@langchain/openai": "^0.5.x",
-    "nuxt": "^3.x",
-    "vue": "^3.x"
-  },
-  "devDependencies": {
-    "dotenv": "^16.x",
-    "serverless": "^3.x",
-    "serverless-dotenv-plugin": "^6.x",
-    "typescript": "^5.x",
-    "@types/node": "^22.x"
-  }
-}
-```
-
 > **💡 Dica:** Execute `pnpm install` após mover dependências para garantir que o `pnpm-lock.yaml` seja atualizado corretamente.
 
 ---
@@ -1735,26 +1195,13 @@ Layers são pacotes de código/dependências compartilhadas que podem ser reutil
 #### 📦 Estrutura com Layers
 
 ```
-meu-projeto/
-├── lambda-function/     (seu código - 5 MB)
-│   ├── index.mjs
-│   └── package.json
-│
-├── layers/
-│   ├── langchain-layer/         (Layer 1: 50 MB)
-│   │   ├── nodejs/node_modules/
-│   │   │   ├── langchain/
-│   │   │   ├── @langchain/
-│   │   │   └── encoding/
-│   │   └── layer.zip
-│   │
-│   └── openai-layer/            (Layer 2: 40 MB)
-│       ├── nodejs/node_modules/
-│       │   ├── openai/
-│       │   └── axios/
-│       └── layer.zip
-│
-└── serverless.yml  (referencia as layers)
+Lambda Function (5 MB)
+├── Código da aplicação
+└── Referências para Layers
+
+Layer 1: LangChain (~50 MB)
+Layer 2: Qdrant (~100 MB)
+Layer 3: Outras deps (~30 MB)
 ```
 
 #### ✅ Vantagens de Usar Layers
@@ -1775,74 +1222,9 @@ meu-projeto/
 
 #### 📋 Implementação com Layers (Exemplo)
 
-```yaml
-# serverless.yml com Layers
-
-service: rag-chatbot-mvp
-
-plugins:
-  - serverless-dotenv-plugin
-
-provider:
-  name: aws
-  runtime: nodejs18.x
-  region: sa-east-1
-
-# 🔥 Definir Layers
-layers:
-  langchainLayer:
-    path: layers/langchain
-    name: rag-chatbot-langchain-${sls:stage}
-    
-  openaiLayer:
-    path: layers/openai
-    name: rag-chatbot-openai-${sls:stage}
-
-functions:
-  api:
-    handler: .output/server/index.handler
-    # 🔥 Referenciar layers
-    layers:
-      - !Ref LangchainLayerLambdaLayer
-      - !Ref OpenaiLayerLambdaLayer
-    url:
-      cors: true
-      invokeMode: RESPONSE_STREAM
-    timeout: 120
-    memorySize: 512
-```
-
 #### 🛠️ Como Criar uma Layer
 
-```bash
-# 1. Criar estrutura de diretórios
-mkdir -p layers/langchain/nodejs
-
-# 2. Navegar e instalar deps
-cd layers/langchain/nodejs
-pnpm init -y
-pnpm add langchain @langchain/core @langchain/community @langchain/openai
-
-# 3. Compactar (a estrutura AWS espera nodejs/node_modules)
-cd ..
-zip -r langchain-layer.zip nodejs/
-
-# 4. No serverless.yml, apontar para o ZIP
-# (o path aponta para o arquivo ZIP ou para o diretório)
-```
-
 #### 📊 Tamanho Comparativo
-
-```
-SEM Layers (Current):
-├── Função ZIP: 130 MB ❌ Excede limite
-
-COM Layers (Otimizado):
-├── Função ZIP: 5 MB
-├── Langchain Layer: 50 MB (reutilizável)
-└── OpenAI Layer: 40 MB (reutilizável)
-Total enviado: 95 MB (layers são enviadas apenas uma vez) ✅
-```
 
 #### 🎯 Quando Usar Layers
 
@@ -1859,62 +1241,11 @@ Total enviado: 95 MB (layers são enviadas apenas uma vez) ✅
 
 ---
 
-## 7. Estrutura do Projeto
-
-```
-Serverless-RAG-Chatbot-MVP-/
-├── .env.example                 # Template de variáveis de ambiente
-├── .gitignore                   # Arquivos ignorados pelo Git
-├── README.md                    # Este arquivo
-├── package.json                 # Dependências do projeto
-├── nuxt.config.ts               # Configuração do Nuxt 3
-├── tsconfig.json                # Configuração do TypeScript
-├── tailwind.config.js           # Configuração do Tailwind CSS
-├── serverless.yml               # Configuração de deploy AWS Lambda
-│
-├── app.vue                      # Componente raiz da aplicação
-├── pages/                       # Páginas da aplicação
-│   └── index.vue                # Página inicial (Chat UI)
-│
-├── components/                  # Componentes Vue reutilizáveis
-│   ├── ChatMessage.vue          # Componente de mensagem individual
-│   ├── ChatInput.vue            # Componente de input de mensagem
-│   ├── ChatWindow.vue           # Componente da janela de chat
-│   ├── ThemeToggle.vue          # Toggle de dark mode
-│   └── DocumentUpload.vue       # Upload de PDF (drag & drop)
-│
-├── composables/                 # Composables Vue (lógica reutilizável)
-│   ├── useChatHistory.ts        # Gerenciamento do histórico no LocalStorage
-│   └── useChatStream.ts         # Lógica de streaming de mensagens
-│
-├── server/                      # Backend Nitro
-│   ├── api/                     # Rotas da API
-│   │   ├── chat.post.ts         # Endpoint de conversação (streaming)
-│   │   └── ingest.post.ts       # Endpoint de upload de PDF
-│   ├── utils/                   # Utilitários do servidor
-│   │   ├── langchain.ts         # Configuração do LangChain
-│   │   └── qdrant.ts            # Configuração do Qdrant
-│   └── middleware/              # Middleware do servidor
-│
-├── scripts/                     # Scripts auxiliares
-│   ├── ingest.ts                # Script de ingestão de PDF para Qdrant
-│   └── README.md                # Documentação dos scripts
-│
-├── data/                        # Dados do projeto
-│   └── documents/               # PDFs para ingestão
-│       └── .gitkeep
-│
-├── public/                      # Arquivos estáticos
-│   └── favicon.ico
-│
-└── assets/                      # Assets processados (CSS, imagens)
-    └── css/
-        └── main.css             # CSS global
-```
+## 6. Estrutura do Projeto
 
 ---
 
-## 8. HTTP API vs REST API no AWS API Gateway
+## 7. HTTP API vs REST API no AWS API Gateway
 
 ### Diferenças Principais
 
@@ -1951,19 +1282,9 @@ Quando você usa HTTP API e envia dados binários (como PDF):
 
 ### Exemplo do Fluxo
 
-```
-Cliente → PDF (binário) → API Gateway → Base64 → Lambda → Precisa decodificar
-```
-
 ### Solução Correta para HTTP API
 
 #### ❌ Solução ERRADA (mudar para REST API)
-```yaml
-events:
-  - http:  # ← REST API
-      path: /api/ingest
-      method: POST
-```
 
 **Problemas**:
 - Mais caro (70% mais caro)
@@ -1973,30 +1294,8 @@ events:
 #### ✅ Solução CORRETA (decodificar base64)
 
 **No Cliente** (opcional - pode enviar binário normal):
-```typescript
-// Opção 1: Enviar binário direto (deixar API Gateway codificar)
-const formData = new FormData()
-formData.append('file', pdfFile)
-await fetch('/api/ingest', { method: 'POST', body: formData })
-
-// Opção 2: Codificar manualmente (mais controle)
-const base64 = Buffer.from(pdfBuffer).toString('base64')
-await fetch('/api/ingest', {
-  method: 'POST',
-  body: JSON.stringify({ body: base64 }),
-  headers: { 'Content-Type': 'application/json' }
-})
-```
 
 **Na Lambda** (sempre necessário com HTTP API):
-```typescript
-// Detectar se está codificado em base64
-if (event.isBase64Encoded) {
-  // Decodificar antes de processar
-  const buffer = Buffer.from(event.body, 'base64')
-  // Processar buffer decodificado
-}
-```
 
 ### Implementação no Nuxt com h3
 
@@ -2010,28 +1309,6 @@ No nosso caso, usamos `readMultipartFormData` do h3, que não sabe que o API Gat
 4. Resultado: dados corrompidos (650893 bytes ao invés de 373035)
 
 #### Solução
-
-```typescript
-import { defineEventHandler, readRawBody } from 'h3'
-
-export default defineEventHandler(async (event) => {
-  // Obter o evento Lambda original
-  const lambdaEvent = event.node.req
-
-  // Verificar se está codificado em base64
-  if (lambdaEvent.isBase64Encoded) {
-    // Ler o body raw e decodificar
-    const rawBody = await readRawBody(event)
-    const decodedBody = Buffer.from(rawBody, 'base64')
-    
-    // Agora processar o multipart do body decodificado
-    // ... parsear multipart manualmente ou usar biblioteca
-  } else {
-    // Processar normalmente
-    const body = await readMultipartFormData(event)
-  }
-})
-```
 
 ### Comparação de Custos
 
@@ -2081,7 +1358,7 @@ A solução de decodificação base64 é simples e resolve o problema completame
 
 ---
 
-## 9. Problemas Identificados na Rota de Ingestão de PDF
+## 8. Problemas Identificados na Rota de Ingestão de PDF
 
 ### Data: 2025-12-10
 
@@ -2102,24 +1379,15 @@ O PDFLoader do LangChain não conseguiu processar o PDF diretamente do Buffer re
 
 #### Tentativas de Solução
 1. **Tentativa 1**: Converter Buffer para Blob
-   ```typescript
-   const pdfBlob = new Blob([filePart.data], { type: 'application/pdf' })
-   const loader = new PDFLoader(pdfBlob)
-   ```
+   
    **Resultado**: Falhou com erro de tipo
 
 2. **Tentativa 2**: Converter Buffer para Uint8Array antes do Blob
-   ```typescript
-   const pdfBlob = new Blob([new Uint8Array(filePart.data)], { type: 'application/pdf' })
-   ```
+   
    **Resultado**: Falhou com mesmo erro
 
 3. **Solução Final**: Salvar temporariamente em `/tmp`
-   ```typescript
-   const tempFilePath = join('/tmp', `upload-${Date.now()}.pdf`)
-   writeFileSync(tempFilePath, pdfBuffer)
-   const loader = new PDFLoader(tempFilePath)
-   ```
+   
    **Resultado**: PDF carregado com sucesso, mas com problemas de parsing
 
 ---
@@ -2128,9 +1396,6 @@ O PDFLoader do LangChain não conseguiu processar o PDF diretamente do Buffer re
 
 #### Problema
 A biblioteca PDFLoader do LangChain usa pdf-parse internamente, que estava gerando warnings de stream corrompido:
-```
-Warning: Invalid stream: "FormatError: Bad FCHECK in flate stream: 120, 239"
-```
 
 #### Causa
 - O PDF `thiago_relatorio.pdf` tem streams de compressão que o pdf-parse interpreta como corrompidos
@@ -2138,11 +1403,6 @@ Warning: Invalid stream: "FormatError: Bad FCHECK in flate stream: 120, 239"
 - No Lambda, apenas 10 caracteres (quebras de linha) foram extraídos
 
 #### Logs
-```
-2025-12-10 15:21:08.793	INFO	PDF buffer size: 650893
-2025-12-10 15:21:09.530	INFO	PDF pages: 5
-2025-12-10 15:21:09.530	INFO	Text length: 10
-```
 
 #### Tentativas de Solução
 1. Usar PDFLoader com opções padrão
@@ -2162,19 +1422,6 @@ A collection `rag-chatbot-documents` não existia no Qdrant Cloud, causando erro
 
 #### Solução
 Script de teste executado:
-```javascript
-const qdrant = new QdrantClient({
-  url: process.env.QDRANT_URL,
-  apiKey: process.env.QDRANT_API_KEY
-});
-
-await qdrant.createCollection('rag-chatbot-documents', {
-  vectors: {
-    size: 1536, // OpenAI embeddings dimension
-    distance: 'Cosine'
-  }
-});
-```
 
 **Resultado**: Collection criada com sucesso
 
@@ -2193,17 +1440,8 @@ Após resolver o problema da collection, o erro mudou para "No text content foun
 
 #### Logs Comparativos
 **Local**:
-```
-✅ PDF parsed successfully!
-Pages: 5
-Text length: 7516
-```
 
 **Lambda**:
-```
-INFO	PDF pages: 5
-INFO	Text length: 10
-```
 
 ---
 
@@ -2217,23 +1455,12 @@ O buffer estava chegando com tamanho incorreto: **650893 bytes** ao invés de **
 - h3's `readMultipartFormData` retorna dados que podem incluir boundaries e headers
 
 #### Logs
-```
-INFO	PDF buffer size: 650893
-INFO	First 10 bytes: 255044462d312e370d0a  (%PDF-1.7)
-INFO	Last 10 bytes: 3835320d0a2525454f46  (%%EOF)
-```
 
 **Observação**: Apesar dos primeiros e últimos bytes estarem corretos (`%PDF-1.7` e `%%EOF`), o tamanho total estava incorreto.
 
 #### Tentativas de Solução
 1. **Tentativa 1**: Extrair PDF do buffer buscando `%PDF` e `%%EOF`
-   ```typescript
-   const pdfStart = pdfBuffer.indexOf('%PDF')
-   const pdfEnd = pdfBuffer.lastIndexOf('%%EOF')
-   if (pdfStart !== -1 && pdfEnd !== -1) {
-     pdfBuffer = pdfBuffer.slice(pdfStart, pdfEnd + 5)
-   }
-   ```
+   
    **Resultado**: Tamanho continuou 650893 bytes
 
 ---
@@ -2256,16 +1483,6 @@ Após análise do StackOverflow (https://stackoverflow.com/questions/57121011/ho
    - Buffer pode conter encoding adicional
 
 #### Logs de Debug
-```typescript
-console.log('File part:', {
-  name: filePart.name,        // 'file'
-  filename: filePart.filename, // 'thiago_relatorio.pdf'
-  type: filePart.type,        // 'application/pdf'
-  dataLength: 650893,         // ❌ Deveria ser 373035
-  dataType: 'object',
-  isBuffer: true
-})
-```
 
 ---
 
@@ -2282,25 +1499,8 @@ API Gateway HTTP API não suporta `multipart/form-data` diretamente. Quando voc�
 #### Solução Correta
 
 **Opção 1: Usar REST API ao invés de HTTP API**
-```yaml
-# serverless.yml
-functions:
-  api:
-    handler: .output/server/index.handler
-    events:
-      - http:  # ← REST API ao invés de httpApi
-          path: /api/ingest
-          method: POST
-```
 
 **Opção 2: Decodificar base64 na Lambda**
-```typescript
-// Detectar se é base64
-if (event.isBase64Encoded) {
-  const buffer = Buffer.from(event.body, 'base64')
-  // Parsear multipart manualmente ou usar biblioteca como busboy
-}
-```
 
 **Opção 3: Usar S3 Presigned URL (Recomendado para arquivos grandes)**
 1. Cliente solicita presigned URL
@@ -2363,35 +1563,12 @@ Assim, basta definir `API_BASE_URL` apontando para a URL da API e o upload funci
 
 #### Problema
 Ao tentar fazer upload de PDFs via rota `/api/ingest`, a API retornava erro `Bad Request` do Qdrant:
-```
-ApiError: Bad Request
-Format error in JSON body: value test-user-python-1765402104281-0 is not a valid point ID, 
-valid values are either an unsigned integer or a UUID
-```
 
 #### Causa
 O código estava gerando IDs de pontos (vectors) no formato `${documentId}-${index}` (ex: `test-user-python-1765402104281-0`), mas o **Qdrant requer que Point IDs sejam exclusivamente UUIDs ou números inteiros não assinados**. Strings arbitrárias não são aceitas.
 
 #### Solução Implementada
 Foi adicionado o import da biblioteca `uuid` e alterado o código para gerar UUIDs válidos para cada chunk:
-
-```typescript
-import { v4 as uuidv4 } from 'uuid'
-
-// Antes (ERRADO):
-const points = chunks.map((chunk, idx) => ({
-  id: `${documentId}-${idx}`, // ❌ Formato inválido
-  vector: vectors[idx],
-  payload: { ... }
-}))
-
-// Depois (CORRETO):
-const points = chunks.map((chunk, idx) => ({
-  id: uuidv4(), // ✅ UUID válido
-  vector: vectors[idx],
-  payload: { ... }
-}))
-```
 
 #### Como Identificar o Problema
 1. **Logs da Lambda**: Use `serverless logs -f api --startTime 10m` para ver os erros detalhados
@@ -2424,7 +1601,7 @@ const points = chunks.map((chunk, idx) => ({
 
 ---
 
-## 10. Processamento de PDF: LangChain 100% vs Abordagem Híbrida
+## 9. Processamento de PDF: LangChain 100% vs Abordagem Híbrida
 
 ### Contexto
 
@@ -2437,36 +1614,6 @@ Este projeto usa a **Abordagem Híbrida**. Aqui está o porquê.
 ---
 
 ### Abordagem 1: LangChain 100% (PDFLoader)
-
-```typescript
-import { PDFLoader } from 'langchain/document_loaders/fs/pdf'
-import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter'
-import { OpenAIEmbeddings } from '@langchain/openai'
-
-// 1. Salvar em /tmp (obrigatório)
-const tempFilePath = join('/tmp', `upload-${Date.now()}.pdf`)
-writeFileSync(tempFilePath, pdfBuffer)
-
-// 2. Carregar PDF com LangChain
-const loader = new PDFLoader(tempFilePath)
-const docs = await loader.load()  // Retorna Document[]
-
-// 3. Dividir em chunks (opcional, já vem dividido por página)
-const textSplitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 1000,
-  chunkOverlap: 200
-})
-const chunks = await textSplitter.splitDocuments(docs)
-
-// 4. Gerar embeddings
-const embeddings = new OpenAIEmbeddings({ openAIApiKey: apiKey })
-const vectors = await embeddings.embedDocuments(
-  chunks.map(c => c.pageContent)
-)
-
-// 5. Limpar arquivo
-unlinkSync(tempFilePath)
-```
 
 #### Características
 - **Aceita**: `string` (caminho de arquivo) ou `Blob`
@@ -2492,27 +1639,6 @@ unlinkSync(tempFilePath)
 ---
 
 ### Abordagem 2: Híbrida (pdf-parse + LangChain) ✅ Atual
-
-```typescript
-import pdfParse from 'pdf-parse'
-import { RecursiveCharacterTextSplitter } from 'langchain/text_splitter'
-import { OpenAIEmbeddings } from '@langchain/openai'
-
-// 1. Extrair texto com pdf-parse (direto do buffer)
-const pdfData = await pdfParse(pdfBuffer, { max: 0 })
-const text = pdfData.text
-
-// 2. Dividir em chunks com LangChain
-const textSplitter = new RecursiveCharacterTextSplitter({
-  chunkSize: 1000,
-  chunkOverlap: 200
-})
-const chunks = await textSplitter.splitText(text)
-
-// 3. Gerar embeddings com LangChain
-const embeddings = new OpenAIEmbeddings({ openAIApiKey: apiKey })
-const vectors = await embeddings.embedDocuments(chunks)
-```
 
 #### Características
 - **Aceita**: `Buffer` diretamente
@@ -2566,18 +1692,6 @@ const vectors = await embeddings.embedDocuments(chunks)
 
 #### O que usamos de cada biblioteca
 
-```
-pdf-parse:
-  - Extração de texto do PDF
-  - Aceita Buffer diretamente
-  - Fornece metadados básicos (páginas, info)
-
-LangChain:
-  - RecursiveCharacterTextSplitter (chunking inteligente)
-  - OpenAIEmbeddings (geração de vetores)
-  - Não usamos: PDFLoader (substituído por pdf-parse)
-```
-
 ---
 
 ### Quando Usar Cada Abordagem?
@@ -2600,31 +1714,6 @@ LangChain:
 ---
 
 ### Código de Referência (Implementação Atual)
-
-```typescript
-// server/api/ingest.post.ts
-
-// Decodificar PDF de base64
-const pdfBuffer = Buffer.from(jsonBody.body, 'base64')
-
-// 1. Extrair texto com pdf-parse (direto do buffer)
-const pdfData = await pdfParse(pdfBuffer, { max: 0 })
-const text = pdfData.text
-
-// 2. Criar chunks com LangChain (AUTOMÁTICO)
-const textSplitter = new RecursiveCharacterTextSplitter({ 
-  chunkSize: 1000,
-  chunkOverlap: 200
-})
-const chunks = await textSplitter.splitText(text)
-
-// 3. Gerar embeddings com LangChain (AUTOMÁTICO)
-const embeddings = new OpenAIEmbeddings({ openAIApiKey: config.openaiApiKey })
-const vectors = await embeddings.embedDocuments(chunks)
-
-// 4. Salvar no Qdrant
-await qdrant.upsert(collectionName, { points: ... })
-```
 
 ---
 

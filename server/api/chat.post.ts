@@ -53,46 +53,28 @@ import { ChatOpenAI, OpenAIEmbeddings } from '@langchain/openai'
 import { HumanMessage, AIMessage, SystemMessage } from 'langchain/schema'
 import { QdrantClient } from '@qdrant/js-client-rest'
 
-// POST method -> Accessed via /api/chat.post.ts by url
-// Await similar to FastAPI
-// Event is similar to Request object in FastAPI(ASGI) -> body, headers, etc.
 export default defineEventHandler(async (event) => {
-  // CORS headers (allow cross-origin requests from frontend)
   setResponseHeader(event, 'Access-Control-Allow-Origin', '*')
   setResponseHeader(event, 'Access-Control-Allow-Methods', 'POST, OPTIONS')
   setResponseHeader(event, 'Access-Control-Allow-Headers', 'Content-Type, x-user-id')
 
+  // Streaming headers
+  setResponseHeader(event, 'Content-Type', 'text/event-stream')
+  setResponseHeader(event, 'Cache-Control', 'no-cache')
+  setResponseHeader(event, 'Connection', 'keep-alive')
+  setResponseHeader(event, 'X-Accel-Buffering', 'no')
+
   // Handle Preflight OPTIONS request immediately (Function URL specific)
   if (event.method === 'OPTIONS') {
-    setResponseStatus(event, 204)
+    setResponseStatus(event, 204) // success but no content
     return null
   }
 
   try {
     console.log('[CHAT] Starting chat request processing')
-    
-    // Body
-    const body = await readBody<{
-      question?: string
-      history?: Array<{ role: string; content: string }>
-      userId?: string
-    }>(event)
-
-    const question = body?.question?.trim()
-    const history = Array.isArray(body?.history) ? body.history : []
-    const userId = getRequestHeader(event, 'x-user-id') || body?.userId || 'anon'
-
-    console.log('[CHAT] User ID:', userId)
-    console.log('[CHAT] Question:', question)
-    console.log('[CHAT] History length:', history.length, 'messages')
-
-    if (!question) {
-      console.error('[CHAT] Error: Missing question in request body')
-      setResponseHeader(event, 'Content-Type', 'application/json')
-      return { success: false, message: 'Missing "question" in request body.' }
-    }
 
     const config = useRuntimeConfig()
+
     const collectionName = config.qdrantCollectionName
 
     console.log('[CHAT] Initializing Qdrant client, collection:', collectionName)
@@ -106,21 +88,40 @@ export default defineEventHandler(async (event) => {
       openAIApiKey: config.openaiApiKey
     })
 
-    // Streaming headers
-    setResponseHeader(event, 'Content-Type', 'text/event-stream')
-    setResponseHeader(event, 'Cache-Control', 'no-cache')
-    setResponseHeader(event, 'Connection', 'keep-alive')
-    setResponseHeader(event, 'X-Accel-Buffering', 'no')
+    // Generics <{...}> -> type safety for the body
+    const body = await readBody<{
+      question?: string
+      history?: Array<{ role: string; content: string }> // Dict array
+      userId?: string
+    }>(event)
 
+    const question = body?.question?.trim()
+    const history = body.history || []
+    const userId = body?.userId || 'anon'
+
+    if (!question) {
+      console.error('[CHAT] Error: Missing question in request body')
+      setResponseHeader(event, 'Content-Type', 'application/json')
+      return { success: false, message: 'Missing "question" in request body.' }
+    }
+
+    console.log('[CHAT] User ID:', userId)
+    console.log('[CHAT] Question:', question)
+    console.log('[CHAT] History length:', history.length, 'messages')
+
+    // Streaming configurations
     const encoder = new TextEncoder()
 
     const stream = new ReadableStream({
       async start(controller) {
         try {
+          // Ex: "Qual é o conteúdo do documento?" -> [0.1, 0.2, 0.3, ... 1536 numbers]
           console.log('[CHAT] Generating query embedding for search')
           const queryVector = await embeddings.embedQuery(question)
           console.log('[CHAT] ✓ Query embedding generated (1536 dimensions)')
 
+          // Ex: [0.1, 0.2, 0.3, ... 1536 numbers] -> [0.1, 0.2, 0.3, ... 1536 numbers]
+          // Cosine similarity between vector and vectors in Qdrant
           console.log('[CHAT] Searching Qdrant for relevant contexts...')
           const searchResults = await qdrant.search(collectionName, {
             vector: queryVector,
@@ -128,14 +129,14 @@ export default defineEventHandler(async (event) => {
             with_payload: true
           })
 
+              // Process search results into simple text
+              // map
           const contextTexts = searchResults
             .map((hit) => {
-              const payload = hit.payload as { text?: string }
-              return payload?.text || ''
+              const payload = hit.payload as { text?: string } // transform the payload into a dictionary of text
+              return payload.text // text property of the payload
             })
-            .filter(Boolean)
-
-          console.log('[CHAT] ✓ Retrieved', contextTexts.length, 'relevant chunks from Qdrant')
+            .filter(Boolean) // Filter out empty strings ( '', null, undefined )
           
           if (contextTexts.length === 0) {
             console.warn('[CHAT] ⚠️ No relevant contexts found in Qdrant - model will respond with "no information found"')
@@ -150,7 +151,7 @@ export default defineEventHandler(async (event) => {
               if (msg.role === 'assistant') return new AIMessage(msg.content)
               return null
             })
-            .filter((m): m is HumanMessage | AIMessage => m !== null)
+            .filter(Boolean) // Filter out null values
           console.log('[CHAT] ✓ Converted', historyMessages.length, 'history messages')
 
           console.log('[CHAT] Building system prompt with context...')

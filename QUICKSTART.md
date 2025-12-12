@@ -39,4 +39,4 @@ serverless logs -f api --tail            # Seguir logs em tempo real
 serverless logs -f api --filter "ERROR"  # Filtrar apenas erros
 
 # Após iniciar o backend lambda -> Iniciar Frontend local apontando para a Lambda (ajuste a URL do deploy)
-API_BASE_URL=<URL AQUI> pnpm dev --host 0.0.0.0
+API_BASE_URL=https://2u8hvyvvje.execute-api.sa-east-1.amazonaws.com/api pnpm dev --host 0.0.0.0
