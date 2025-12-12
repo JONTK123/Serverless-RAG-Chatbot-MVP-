@@ -48,11 +48,19 @@ export const useChatStream = () => {
    * @example
    * const response = await sendMessage('What is RAG?', messages.value)
    */
-  const sendMessage = async (question: string, history: ChatMessage[]): Promise<string> => {
+  const sendMessage = async (
+    question: string,
+    history: ChatMessage[],
+    onChunk?: (chunk: string) => void
+  ): Promise<string> => {
     isLoading.value = true
     error.value = null
 
     try {
+      console.log('[FRONTEND] 📤 Sending message to backend')
+      console.log('[FRONTEND] Question:', question)
+      console.log('[FRONTEND] History length:', history.length, 'messages')
+      
       // Obter a URL base da API (dinâmica: local ou Lambda)
       const config = useRuntimeConfig()
       const apiBase = config.public.apiBase
@@ -67,9 +75,13 @@ export const useChatStream = () => {
       }
 
       // Make request to the API endpoint
-      // Se apiBase é uma URL completa (Lambda), usa ela
-      // Se é relativo (/api), usa o padrão local
-      const apiUrl = apiBase.startsWith('http') ? `${apiBase}/chat` : `${apiBase}/chat`
+      // Se apiBase já tem /api, usa direto
+      // Se não tem, adiciona /api
+      const basePath = apiBase.endsWith('/api') ? apiBase : `${apiBase}/api`
+      const apiUrl = `${basePath}/chat`
+      
+      console.log('[FRONTEND] API URL:', apiUrl)
+      console.log('[FRONTEND] Session ID:', sessionId.value)
       
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -79,21 +91,53 @@ export const useChatStream = () => {
         },
         body: JSON.stringify(payload)
       })
+      
+      console.log('[FRONTEND] ✓ Response received, status:', response.status)
 
-      if (!response.ok) {
+      if (!response.ok || !response.body) {
+        console.error('[FRONTEND] ❌ API Error:', response.status, response.statusText)
         throw new Error(`API Error: ${response.status} ${response.statusText}`)
       }
 
+      const contentType = response.headers.get('Content-Type') || ''
+      console.log('[FRONTEND] Content-Type:', contentType)
+
+      // Se for streaming (text/event-stream), ler via reader
+      if (contentType.includes('text/event-stream')) {
+        console.log('[FRONTEND] 📡 Starting stream reading...')
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let fullText = ''
+        let chunkCount = 0
+        
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) {
+            console.log('[FRONTEND] ✅ Stream completed -', chunkCount, 'chunks received')
+            break
+          }
+          const chunk = decoder.decode(value, { stream: true })
+          fullText += chunk
+          chunkCount++
+          if (onChunk) onChunk(chunk)
+        }
+        return fullText.trim() || 'Sem resposta do servidor.'
+      }
+
+      // Caso contrário, tentar JSON
+      console.log('[FRONTEND] Parsing JSON response...')
       const data = await response.json()
+      console.log('[FRONTEND] ✓ JSON parsed:', data)
       return data.message || data.response || 'Sem resposta do servidor.'
 
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido ao enviar mensagem'
       error.value = errorMessage
-      console.error('Error in sendMessage:', err)
+      console.error('[FRONTEND] ❌ Error in sendMessage:', err)
       throw err
     } finally {
       isLoading.value = false
+      console.log('[FRONTEND] Request completed')
     }
   }
 
@@ -119,11 +163,7 @@ export const useChatStream = () => {
     history: ChatMessage[],
     onChunk?: (chunk: string) => void
   ): Promise<string> => {
-    // TODO: Implement streaming support
-    // Will use ReadableStream API and getReader() to process chunks in real-time
-    
-    // For now, fallback to regular sendMessage
-    return sendMessage(question, history)
+    return sendMessage(question, history, onChunk)
   }
 
   return {

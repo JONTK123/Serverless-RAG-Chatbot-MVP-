@@ -215,7 +215,12 @@ const uploadDocument = async () => {
       }
     }, 500)
 
-    const response = await fetch(`${useRuntimeConfig().public.apiBase}/ingest`, {
+    // Construir URL corretamente (garantir /api no path)
+    const apiBase = useRuntimeConfig().public.apiBase
+    const basePath = apiBase.endsWith('/api') ? apiBase : `${apiBase}/api`
+    const ingestUrl = `${basePath}/ingest`
+
+    const response = await fetch(ingestUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

@@ -107,27 +107,34 @@ const handleSendMessage = async (message: string) => {
   
   scrollToBottom()
 
+  // Prepare assistant placeholder to stream into
+  const assistantMsg = {
+    role: 'assistant',
+    content: '',
+    timestamp: Date.now()
+  }
+  addMessage(assistantMsg)
+  const assistantIndex = messages.value.length - 1
+  
   try {
-    // Send to API and get response
-    const response = await sendMessage(message, messages.value)
-    
-    // Add assistant response
-    if (response) {
-      addMessage({
-        role: 'assistant',
-        content: response,
-        timestamp: Date.now()
-      })
-      scrollToBottom()
+    const fullResponse = await sendMessage(
+      message,
+      messages.value,
+      (chunk) => {
+        messages.value[assistantIndex].content += chunk
+        scrollToBottom()
+      }
+    )
+
+    // Ensure final content set (in case stream didn't flush)
+    if (fullResponse) {
+      messages.value[assistantIndex].content = fullResponse
     }
+    scrollToBottom()
   } catch (err) {
     console.error('Error sending message:', err)
-    // Add error message
-    addMessage({
-      role: 'assistant',
-      content: 'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.',
-      timestamp: Date.now()
-    })
+    messages.value[assistantIndex].content =
+      'Desculpe, ocorreu um erro ao processar sua mensagem. Por favor, tente novamente.'
     scrollToBottom()
   }
 }
