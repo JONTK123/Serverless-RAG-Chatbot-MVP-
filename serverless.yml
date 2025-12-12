@@ -1,0 +1,24 @@
+service: rag-chatbot-mvp
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: sa-east-1
+  environment:
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    QDRANT_URL: ${env:QDRANT_URL}
+    QDRANT_API_KEY: ${env:QDRANT_API_KEY}
+    QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
+
+functions:
+  api:
+    handler: .output/server/index.handler
+    url:
+      cors: true
+      invokeMode: RESPONSE_STREAM  
+    timeout: 300
+    memorySize: 512
+
+plugins:
+  - serverless-dotenv-plugin
