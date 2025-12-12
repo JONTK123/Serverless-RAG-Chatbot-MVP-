@@ -1,0 +1,63 @@
+# Nuxt dev/build outputs
+.output
+.nuxt
+.nitro
+.cache
+dist
+
+# Node dependencies
+node_modules
+
+# Lock files (escolha apenas um gerenciador de pacotes)
+package-lock.json
+yarn.lock
+# pnpm-lock.yaml é commitado (recomendado para pnpm)
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# OS
+.DS_Store
+.fleet
+.idea
+
+# Vim
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Serverless Framework
+.serverless
+
+# AWS
+.aws-sam
+
+# TypeScript
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Data files (PDFs not to be committed)
+data/documents/*.pdf
+
+# Build artifacts
+build/

@@ -1,0 +1,193 @@
+# SERVERLESS CONFIGURATION - RAG CHATBOT MVP
+#
+# TWO MODES AVAILABLE:
+#
+# 1. API-ONLY MODE - Lambda backend + local frontend -> HTTP API Gateway
+#    - Deploy only the Lambda API with streaming
+#    - Frontend runs locally
+#
+# 2. API-ONLY MODE - Lambda backend + local frontend -> Function URL
+#    - deploy only the Lambda API with streaming
+#    - frontend runs locally
+#    - api base url is the function url
+#
+# 3. FULL-STACK MODE - Frontend + Backend on Lambda -> HTTP API Gateway OU Function URL
+#    - Deploy full Nuxt app (SSR) on Lambda
+#    - Frontend and Backend together
+# =========================================================================================== #
+
+
+
+
+
+
+# 1. API-ONLY MODE - Lambda backend + local frontend -> HTTP API Gateway
+service: rag-chatbot-mvp
+frameworkVersion: '3'
+
+plugins:
+  - serverless-dotenv-plugin
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: sa-east-1
+  timeout: 30 
+  memorySize: 512  
+  
+  environment:
+    OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+    QDRANT_URL: ${env:QDRANT_URL}
+    QDRANT_API_KEY: ${env:QDRANT_API_KEY}
+    QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
+    NODE_ENV: production
+
+package:
+  individually: false
+  patterns:
+    # Exclude everything
+    - '!**'
+    - '!node_modules/**'
+    - '!.nuxt/**'
+    - '!.git/**'
+    
+    # Include only essentials
+    - '.output/server/index.mjs'
+    - '.output/server/package.json'
+    - '.output/server/node_modules/**'
+    
+    # Exclude unnecessary files inside build node_modules
+    - '!.output/server/node_modules/**/*.md'
+    - '!.output/server/node_modules/**/*.ts'
+    - '!.output/server/node_modules/**/*.map'
+    - '!.output/server/node_modules/**/README*'
+    - '!.output/server/node_modules/**/LICENSE*'
+    - '!.output/server/node_modules/**/CHANGELOG*'
+    - '!.output/server/node_modules/**/.github/**'
+    - '!.output/server/node_modules/**/test/**'
+    - '!.output/server/node_modules/**/tests/**'
+    - '!.output/server/node_modules/**/__tests__/**'
+    - '!.output/server/node_modules/**/docs/**'
+    - '!.output/server/node_modules/**/examples/**'
+
+functions:
+  api:
+    handler: .output/server/index.handler
+    events:
+      # Block frontend routes - allow only /api/*
+      - httpApi:
+          path: /api/chat
+          method: ANY
+      - httpApi:
+          path: /api/ingest
+          method: ANY
+
+
+
+
+
+
+
+
+
+
+
+
+# 2. API-ONLY MODE - Lambda backend + local frontend -> Function URL
+# provider:
+#   name: aws
+#   runtime: nodejs18.x
+#   region: sa-east-1
+#   timeout: 30
+#   memorySize: 512
+  
+#   environment:
+#     OPENAI_API_KEY: ${env:OPENAI_API_KEY}
+#     QDRANT_URL: ${env:QDRANT_URL}
+#     QDRANT_API_KEY: ${env:QDRANT_API_KEY}
+#     QDRANT_COLLECTION_NAME: ${env:QDRANT_COLLECTION_NAME, 'rag-chatbot-documents'}
+#     NODE_ENV: production
+
+# functions:
+#   api:
+#     handler: .output/server/index.handler
+#     url:
+#       cors: true
+#       invokeMode: RESPONSE_STREAM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# 3. FULL-STACK MODE - Frontend + Backend on Lambda -> HTTP API Gateway OU Function URL
+#  
+# package:
+#   patterns:
+#     # Incluir TODO o build Nuxt (frontend + backend)
+#     - '.output/**'
+#     
+#     # Excluir apenas desenvolvimento e configs
+#     - '!node_modules/**'
+#     - '!.nuxt/**'
+#     - '!assets/**'
+#     - '!components/**'
+#     - '!composables/**'
+#     - '!data/**'
+#     - '!pages/**'
+#     - '!scripts/**'
+#     - '!server/**'
+#     - '!public/**'
+#     - '!.env*'
+#     - '!.git/**'
+#     - '!.vscode/**'
+#     - '!*.md'
+#     - '!*.log'
+#     - '!.DS_Store'
+#     - '!tsconfig.json'
+#     - '!tailwind.config.js'
+#     - '!nuxt.config.ts'
+#     - '!app.vue'
+#     - '!pnpm-lock.yaml'
+#     - '!package.json'
+#     - '!serverless.yml'
+#     - '!Dockerfile*'
+#     - '!docker-compose.yml'
+# 
+# functions:
+#   nuxt:
+#     handler: .output/server/index.handler
+#     url:
+#       cors: true
+#       invokeMode: RESPONSE_STREAM
+#     timeout: 120
+#     memorySize: 512
+#     events:
+#       - httpApi: '*'
+#
+#   # Alternativa: somente httpApi (sem Function URL) 
+#   nuxt:
+#     handler: .output/server/index.handler
+#     timeout: 120
+#     memorySize: 512
+#     events:
+#       - httpApi: '*'
+

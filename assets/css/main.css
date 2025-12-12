@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom global styles */
+body {
+  @apply bg-gray-50 text-gray-900;
+}
+
+/* Chat container custom scrollbar */
+.chat-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-scroll::-webkit-scrollbar-track {
+  @apply bg-gray-100;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb {
+  @apply bg-gray-300 rounded-full;
+}
+
+.chat-scroll::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-400;
+}
